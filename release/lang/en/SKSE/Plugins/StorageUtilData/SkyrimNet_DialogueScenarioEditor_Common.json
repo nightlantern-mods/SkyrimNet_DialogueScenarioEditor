@@ -1,0 +1,16 @@
+{
+  "string": {
+    "speakto": "{speaker} is about to say to {listener}, in their own words, something that means: \"{line}\"",
+    "speak": "{speaker} is about to say, in their own words, something that means: \"{line}\"",
+    "autospeakto": "{speaker} is about to say something to {listener} in their own words, following how the scene and the talk so far are going.{context}",
+    "autospeak": "{speaker} is about to say something in their own words, following how the scene and the talk so far are going.{context}",
+    "autowrap": " ({parts})",
+    "autojoin": ". ",
+    "autoscene": "Now: {text}",
+    "autoprev": "Before: {text}",
+    "autonext": "Next: {text}"
+  },
+  "stringList": {
+    "playerwords": ["player", "{player}", "プレイヤー", "{プレイヤー}"]
+  }
+}

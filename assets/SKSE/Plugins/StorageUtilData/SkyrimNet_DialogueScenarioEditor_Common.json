@@ -1,0 +1,16 @@
+{
+  "string": {
+    "speakto": "{speaker}は今から{listener}に、「{line}」という意味のことを、自分らしい言葉で言おうとしている。",
+    "speak": "{speaker}は今から、「{line}」という意味のことを、自分らしい言葉で言おうとしている。",
+    "autospeakto": "{speaker}は今から{listener}に、この場の流れと今までの会話に沿って、自分らしい言葉で何か言おうとしている。{context}",
+    "autospeak": "{speaker}は今から、この場の流れと今までの会話に沿って、自分らしい言葉で何か口にしようとしている。{context}",
+    "autowrap": "（{parts}）",
+    "autojoin": "。",
+    "autoscene": "今の場面：{text}",
+    "autoprev": "その前：{text}",
+    "autonext": "このあと：{text}"
+  },
+  "stringList": {
+    "playerwords": ["player", "{player}", "プレイヤー", "{プレイヤー}"]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "int": {
+    "enabled": 0,
+    "onlytargets": 0,
+    "repeat": 0,
+    "c1_ostim": 1,
+    "c2_ostim": 1,
+    "c3_ostim": 1
+  },
+  "float": {
+    "intervaldays": 1.0
+  },
+  "string": {
+    "c1_narrator": "Everyone is drunk",
+    "c1_tags": "",
+    "c2_narrator": "",
+    "c2_tags": "",
+    "c3_narrator": "",
+    "c3_tags": ""
+  },
+  "stringList": {
+    "c1_actors": ["Faendal", "player"],
+    "c1_lines": ["{player}, it has been a while. Let's sleep together tonight.", "Sure."],
+    "c2_actors": ["Embry", "Hod", "Lydia"],
+    "c2_lines": ["Let's get started too.", "I always wanted to try it with three.", "Fine by me."],
+    "c3_actors": ["Alvor", "Jenassa", "Uthgerd the Unbroken"],
+    "c3_lines": ["So the three of us are what's left.", "The last ones get the best of it.", "Keep dreaming."]
+  }
+}

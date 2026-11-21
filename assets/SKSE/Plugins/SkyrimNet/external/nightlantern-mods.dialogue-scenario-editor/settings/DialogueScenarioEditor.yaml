@@ -1,0 +1,30 @@
+# SkyrimNet Dialogue Scenario Editor - settings schema. The filename names the config
+# (Plugin_DialogueScenarioEditor). The variant gives scenario generation its own model: players
+# set it in SkyrimNet's dashboard, AI > Models, dialogue_scenario_writer. Left empty, the default
+# model is used.
+plugin:
+  name: DialogueScenarioEditor
+  version: "0.1.0"
+  description: "SkyrimNet Dialogue Scenario Editor: writes whole scenarios (plot, narration, lines, OStim scenes) on the settings page."
+
+variants:
+  - name: dialogue_scenario_writer
+    description: "Writes a scenario on the settings page's Generate: one request for the plot and the outline of every column, then one per column for its narration and lines. Answers in JSON; a model that writes good fiction and follows JSON instructions well is best."
+
+schema:
+  fields:
+    - name: "Model Name"
+      path: "llm.model_name"
+      type: "string"
+      description: "Model for scenario generation. Leave empty to inherit SkyrimNet's base model."
+      defaultValue: ""
+      category: "LLM Overrides"
+
+    - name: "Max Tokens"
+      path: "llm.max_tokens"
+      type: "int"
+      description: "Longest answer the model may give for one request (the plot, or one column). Too low and the answer is cut off. Set 0 to inherit SkyrimNet's base value."
+      defaultValue: 4096
+      min: 0
+      max: 16384
+      category: "LLM Overrides"

@@ -1,0 +1,5 @@
+ModKey: SkyrimNet_DialogueScenarioEditor.esp
+GameRelease: SkyrimSE
+ModHeader:
+  Flags:
+  - Small

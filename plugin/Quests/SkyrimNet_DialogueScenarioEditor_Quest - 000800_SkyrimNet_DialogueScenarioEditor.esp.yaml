@@ -1,0 +1,23 @@
+FormKey: 000800:SkyrimNet_DialogueScenarioEditor.esp
+EditorID: SkyrimNet_DialogueScenarioEditor_Quest
+VirtualMachineAdapter:
+  Scripts:
+  - Name: SkyrimNet_DialogueScenarioEditorMain
+  - Name: SkyrimNet_DialogueScenarioEditorUI
+  FileName: ''
+  Aliases:
+  - Property:
+      Name: ''
+      Object: 000800:SkyrimNet_DialogueScenarioEditor.esp
+      Alias: 0
+    Scripts:
+    - Name: SKI_PlayerLoadGameAlias
+    - Name: SkyrimNet_DialogueScenarioEditorPlayer
+Flags:
+- StartGameEnabled
+NextAliasID: 1
+Aliases:
+- Name: Player
+  Flags: []
+  ForcedReference: 000014:Skyrim.esm
+  VoiceTypes: Null

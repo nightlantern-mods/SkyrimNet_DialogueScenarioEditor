@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>SkyrimNet Dialogue Scenario Editor</title>
+<style>
+:root {
+  --bg: rgba(8, 9, 12, 0.72);
+  --panel: #16181d;
+  --panel2: #1e2128;
+  --line: #343844;
+  --text: #e8e4da;
+  --muted: #9a968c;
+  --accent: #c9a45c;
+  --accent2: #8fb3d9;
+  --danger: #d9776b;
+  --ok: #8fc98a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; color: var(--text);
+  font-family: "Yu Gothic UI", "Meiryo", "Segoe UI", sans-serif; font-size: 15px; }
+body { display: flex; align-items: center; justify-content: center; background: var(--bg); }
+button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: #5a4520; border-color: var(--accent); }
+button.danger { border-color: #6a3a35; color: var(--danger); }
+button.small { padding: 2px 8px; font-size: 13px; }
+input, textarea, select { font: inherit; color: var(--text); background: #0f1115; border: 1px solid var(--line);
+  border-radius: 5px; padding: 5px 8px; }
+textarea { width: 100%; resize: vertical; min-height: 54px; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent2); }
+label { cursor: pointer; }
+
+#app { width: 94vw; height: 92vh; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+#top { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+#top h1 { font-size: 18px; margin: 0; color: var(--accent); font-weight: 600; flex: 1; }
+#top .key { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; position: relative; }
+.chip.off { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.chip.on { background: #5a4520; border: 1px solid var(--accent); }
+#body { flex: 1; display: flex; min-height: 0; }
+
+#side { width: 220px; border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+#side .head { padding: 10px 12px; color: var(--muted); font-size: 13px; }
+#list { flex: 1; overflow-y: auto; }
+#list .item { padding: 9px 12px; cursor: pointer; border-left: 3px solid transparent; display: flex; gap: 8px; align-items: center; }
+#list .item:hover { background: var(--panel2); }
+#list .item.sel { background: var(--panel2); border-left-color: var(--accent); }
+#list .item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#list .item.off .nm { color: var(--muted); }
+#side .foot { padding: 10px; border-top: 1px solid var(--line); }
+#side .foot button { width: 100%; }
+
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#editor { flex: 1; overflow: auto; padding: 14px 16px; }
+#empty { color: var(--muted); padding: 40px; text-align: center; }
+.row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
+.row .lbl { width: 80px; color: var(--muted); font-size: 13px; flex: none; }
+.hint { color: var(--muted); font-size: 12px; }
+
+#cols { display: flex; gap: 10px; margin-top: 14px; overflow-x: auto; padding-bottom: 6px; }
+.col { flex: 0 0 300px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.col h3 { margin: 0 0 8px; font-size: 15px; color: var(--accent); display: flex; justify-content: space-between; align-items: center; }
+.col h3 .req { font-size: 11px; color: var(--muted); font-weight: normal; }
+.sec { margin-top: 10px; }
+.sec > .t { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.slot { display: flex; gap: 6px; margin-bottom: 5px; }
+.slot button.pick { flex: 1; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.slot button.pick.emptyslot { color: var(--muted); border-style: dashed; }
+.lrow { border: 1px solid var(--line); border-radius: 6px; padding: 6px; margin-bottom: 6px; }
+.lhead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 4px; }
+.lno { color: var(--muted); font-size: 12px; width: 18px; }
+.ltools { margin-left: auto; display: flex; gap: 2px; }
+/* Auto: the line (or the whole column) is made up in the game, so its text is faded under "Auto". */
+.lbody { position: relative; }
+.lbody.auto textarea { opacity: 0.25; pointer-events: none; }
+.lbody.auto::after, .autobox::after { content: "Auto"; position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; font-size: 30px; font-weight: 800; letter-spacing: 3px; color: #5df08f;
+  text-shadow: 0 0 10px rgba(64, 230, 120, 0.6); pointer-events: none; }
+.autosw { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.autosw input[type=checkbox] { width: 34px; height: 20px; }
+.autosw input[type=checkbox]::after { width: 12px; height: 12px; }
+.autosw input[type=checkbox]:checked::after { left: 16px; }
+.autorow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.seg { display: inline-flex; }
+.seg button { padding: 2px 12px; border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 6px 0 0 6px; }
+.seg button:last-child { border-radius: 0 6px 6px 0; }
+.seg button.on { background: #1f6b3c; border-color: #5df08f; color: #fff; }
+.autobox { position: relative; border: 1px dashed #5df08f; border-radius: 6px; padding: 10px 8px 52px; color: var(--muted); font-size: 12px; }
+.autobox::after { inset: auto 0 8px 0; height: 40px; }
+/* Generate: the AI writes the whole scenario */
+.genbox { margin-top: 14px; border: 1px solid #3b6d8f; border-radius: 8px; background: rgba(60, 110, 150, 0.08); padding: 10px 12px; }
+.genbox h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent2); }
+.genbox .grow { display: flex; gap: 10px; align-items: flex-start; margin-top: 8px; flex-wrap: wrap; }
+.genbox .grow > .lbl { width: 110px; color: var(--muted); font-size: 13px; flex: none; padding-top: 4px; }
+.genbox .grow > .fld { flex: 1; min-width: 220px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.genbox textarea { width: 100%; min-height: 70px; }
+.person { display: inline-flex; align-items: center; gap: 4px; background: #2c3240; border-radius: 12px; padding: 2px 4px 2px 10px; font-size: 13px; }
+.person button { padding: 0 6px; }
+#genBtn { font-weight: 700; padding: 6px 22px; background: linear-gradient(#5d9bd0, #3b6d8f); border: 2px solid #9cc8ee; color: #fff; }
+#genBtn:disabled { opacity: 0.4; }
+#genstat { font-size: 13px; color: var(--muted); }
+#genstat.err { color: var(--danger); }
+#genstat.ok { color: var(--ok); }
+.ltools button { padding: 0 6px; }
+.addcol { flex: 0 0 120px; display: flex; }
+.addcol button { flex: 1; border-style: dashed; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip { background: #2c3240; border-radius: 10px; padding: 1px 8px; font-size: 12px; cursor: pointer; }
+.chip:hover { background: #4a3a3a; }
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+/* On/off switches: every checkbox is drawn as a sliding switch, bright green when on. */
+input[type=checkbox] { -webkit-appearance: none; appearance: none; flex: none; position: relative; margin: 0;
+  width: 42px; height: 24px; border-radius: 12px; background: #3a3e48; border: 2px solid #5a5f6c;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+input[type=checkbox]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: #9a9da6; transition: left 0.15s, background 0.15s; }
+input[type=checkbox]:checked { background: #1fbf5b; border-color: #5df08f; box-shadow: 0 0 8px rgba(64, 230, 120, 0.55); }
+input[type=checkbox]:checked::after { left: 20px; background: #fff; }
+input[type=checkbox]:focus { outline: none; }
+
+#bar { display: flex; gap: 10px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line); }
+#msg { flex: 1; font-size: 13px; color: var(--muted); }
+#msg.err { color: var(--danger); }
+#msg.ok { color: var(--ok); }
+/* The save button: large and bright; it glows while there are unsaved changes. */
+#saveBtn { font-size: 18px; font-weight: 700; padding: 10px 40px; border-radius: 8px; color: #1b1406;
+  background: linear-gradient(#f2c867, #d9a336); border: 2px solid #ffe3a0; }
+#saveBtn:hover { background: linear-gradient(#ffd77d, #e8b346); }
+#saveBtn:disabled { opacity: 0.35; cursor: default; }
+#saveBtn.dirty { box-shadow: 0 0 14px rgba(255, 200, 90, 0.9); animation: savePulse 1.4s ease-in-out infinite; }
+@keyframes savePulse { 50% { box-shadow: 0 0 4px rgba(255, 200, 90, 0.35); } }
+
+/* "Unsaved changes" when closing */
+#confirm { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 10; }
+#confirm.open { display: flex; }
+#cbox { width: 460px; max-width: 90vw; background: var(--panel); border: 2px solid var(--danger); border-radius: 10px; padding: 18px 20px; }
+#cbox h2 { margin: 0 0 8px; font-size: 18px; color: var(--danger); }
+#cbox p { margin: 0 0 16px; line-height: 1.6; }
+#cbox .btns { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+#cbox #cSave { font-weight: 700; color: #1b1406; background: linear-gradient(#f2c867, #d9a336); border: 2px solid #ffe3a0; }
+
+#picker { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; }
+#picker.open { display: flex; }
+#pbox { width: 560px; max-width: 90vw; height: 78vh; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  display: flex; flex-direction: column; }
+#pbox .ph { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
+#pbox .ph input { flex: 1; }
+#plist { flex: 1; overflow-y: auto; }
+#plist .grp { padding: 8px 12px 4px; font-size: 12px; color: var(--accent); }
+#plist .npc { padding: 6px 14px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; }
+#plist .npc:hover { background: var(--panel2); }
+#plist .npc .pl { color: var(--muted); font-size: 12px; white-space: nowrap; }
+#pbox .pf { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+#pbox .pf .hint { flex: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top">
+    <h1>ダイアログシナリオエディタ</h1>
+    <div class="key">この画面を開くキーは MCM で変えられます</div>
+    <button id="closeBtn" title="閉じる">✕ 閉じる</button>
+  </div>
+  <div id="body">
+    <div id="side">
+      <div class="head">イベント一覧<br><span class="hint">右のスイッチで有効／無効（すぐ保存されます）</span></div>
+      <div id="list"></div>
+      <div class="foot"><button id="newBtn">＋ 新しいイベント</button></div>
+    </div>
+    <div id="main">
+      <div id="editor"><div id="empty">左の一覧からイベントを選ぶか、「新しいイベント」を押してください。</div></div>
+      <div id="bar">
+        <div id="msg"></div>
+        <button id="delBtn" class="danger">削除</button>
+        <button id="saveBtn" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="picker">
+  <div id="pbox">
+    <div class="ph"><input id="psearch" placeholder="名前で検索"><button id="pclose">キャンセル</button></div>
+    <div id="plist"></div>
+    <div class="pf"><span class="hint" id="pstat"></span><button id="pload">すべての NPC を読み込む</button></div>
+  </div>
+</div>
+
+<div id="confirm">
+  <div id="cbox">
+    <h2>保存していない変更があります</h2>
+    <p id="ctext"></p>
+    <div class="btns">
+      <button id="cBack">戻る</button>
+      <button id="cDiscard" class="danger">保存せずに閉じる</button>
+      <button id="cSave">保存して閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const COLS = 10, PER = 3, MAXLINES = 10;
+const PLAYER_SPEC = "{プレイヤー}";
+const TAGS = [
+  ["missionary","正常位"],["doggystyle","後背位"],["cowgirl","騎乗位"],["reversecowgirl","背面騎乗位"],["standing","立位"],
+  ["spooning","側位"],["prone","寝バック"],["matingpress","種付けプレス"],["lap","膝の上"],["carry","抱え上げ"],["butterfly","バタフライ"],
+  ["sixtynine","69"],["facesitting","顔面騎乗"],["spitroast","前後から"],["romantic","ロマンチック"],["lustful","激しい"],["dom","支配"],
+  ["femdom","女性が支配"],["foreplay","前戯"],["kissing","キス"],["oral","オーラル"],["blowjob","フェラ"],["anal","アナル"],["dp","二穴"],
+  ["vaginalsex","膣性交"],["analsex","アナル性交"],["handjob","手コキ"],["cunnilingus","クンニ"],["hug","ハグ"],["boobjob","パイズリ"],["footjob","足コキ"],
+  ["femalemasturbation","オナニー（女）"],["malemasturbation","オナニー（男）"],["vaginaltoying","おもちゃ（前）"],["analtoying","おもちゃ（後ろ）"]];
+
+const S = { player: "", setups: {}, order: [], sel: null, draft: null, nearby: [], npcs: [], npcsLoaded: false, npcsLoading: false, pick: null };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------------------------------------------------------------- bridge to Papyrus
+function send(name, payload) {
+  if (typeof window[name] === "function") { window[name](payload == null ? "" : String(payload)); return true; }
+  return false;
+}
+(function hello() { if (!send("dse_ready", "")) setTimeout(hello, 200); })();
+
+// fast: the DLL lists every NPC at once, so the list is loaded right away (without it, the
+// Papyrus scan takes minutes and waits for the button).
+window.dseBegin = (player, fast) => { S.player = player; S.setups = {}; S.order = []; S.nearby = []; S.fastNpcs = !!fast; };
+window.dseSetup = (name, obj) => { if (obj && typeof obj === "object") { S.setups[name] = fromFile(name, obj); S.order.push(name); } };
+window.dseNearby = (list) => { S.nearby = (list || []).map(toNpc); };
+window.dseEnd = () => {
+  S.order.sort();
+  if (S.sel && !S.setups[S.sel] && !(S.draft && S.draft.isNew)) { S.sel = null; S.draft = null; }
+  if (S.sel && S.setups[S.sel] && !(S.draft && S.draft.dirty)) S.draft = clone(S.setups[S.sel]);
+  renderList(); renderEditor();
+  if (S.fastNpcs) loadNpcs();
+};
+window.dseNpcs = (list, at, total) => {
+  for (const e of list || []) S.npcs.push(toNpc(e));
+  if (!S.fastNpcs) $("pstat").textContent = "読み込み中… " + Math.floor(at * 100 / Math.max(1, total)) + "%（数分かかることがあります）";
+};
+// count < 0: count them here (the DLL sends the list in one piece).
+window.dseNpcsDone = (count) => {
+  S.npcsLoading = false; S.npcsLoaded = true;
+  S.npcs.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  $("pstat").textContent = (count < 0 ? S.npcs.length : count) + " 人の NPC を読み込みました";
+  $("pload").style.display = "none";
+  renderPicker();
+};
+window.dseSaved = (name, ok) => {
+  if (S.quick && S.quick === name) {
+    // the list switch: only that file changed; the editor and its draft stay as they are
+    S.quick = null;
+    const s = S.setups[name];
+    if (!ok) { msg("保存できませんでした。", "err"); return; }
+    msg("「" + name + "」を" + (s && s.enabled ? "有効" : "無効") + "にしました。", "ok");
+    return;
+  }
+  const closing = S.closeAfterSave; S.closeAfterSave = false;
+  if (!ok) { msg("保存できませんでした。", "err"); return; }
+  const d = S.draft; d.dirty = false; d.isNew = false;
+  S.setups[name] = clone(d);
+  if (!S.order.includes(name)) { S.order.push(name); S.order.sort(); }
+  S.sel = name; renderList(); msg("保存しました。", "ok");
+  if (closing) send("dse_close", "");
+};
+window.dseDeleted = (name) => {
+  delete S.setups[name]; S.order = S.order.filter((n) => n !== name);
+  S.sel = null; S.draft = null; renderList(); renderEditor(); msg("削除しました。", "ok");
+};
+
+// ---------------------------------------------------------------- data
+function toNpc(e) {
+  const id = e[0] >>> 0, plugin = e[1], name = e[2];
+  const local = (id >>> 24) === 0xFE ? (id & 0xFFF) : (id & 0xFFFFFF);
+  return { spec: "0x" + local.toString(16).toUpperCase() + "|" + plugin, plugin, name };
+}
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+// A column: participants (up to PER), lines in speaking order (each { who: participant index or
+// -1 when not chosen yet, text, auto: made up in the game }), narration, OStim on/off and tags.
+// auto: every line of the column is made up in the game, AUTOLINES[autolen] of them.
+const AUTOLINES = [3, 6, 10], AUTONAMES = ["短", "中", "長"];
+function blankCol() { return { actors: [], lines: [], ostim: true, tags: "", narrator: "", auto: false, autolen: 1 }; }
+// gen: what Generate was (or will be) asked with, kept with the setup so it can be run again.
+function blankGen() { return { theme: "", writer: null, people: [], columns: 3 }; }
+function blankSetup(name) {
+  return { name, enabled: true, onlytargets: false, repeat: false, intervaldays: 1, location: 0, shown: 1,
+    cols: Array.from({ length: COLS }, blankCol), gen: blankGen(), dirty: true, isNew: true };
+}
+function isPlayer(spec) { return ["player", "{player}", "プレイヤー", "{プレイヤー}"].includes(spec); }
+function fromFile(name, o) {
+  const I = o.int || {}, F = o.float || {}, T = o.string || {}, L = o.stringList || {}, N = o.intList || {};
+  const s = blankSetup(name); s.dirty = false; s.isNew = false;
+  s.enabled = !!I.enabled; s.onlytargets = !!I.onlytargets; s.repeat = !!I.repeat;
+  s.intervaldays = F.intervaldays ?? I.intervaldays ?? 1;
+  s.location = I.location || 0;
+  const gp = L.gen_people || [], gn = L.gen_names || [];
+  s.gen = { theme: T.gen_theme || "", columns: I.gen_columns || 3,
+    writer: T.gen_writer ? { spec: T.gen_writer, label: T.gen_writername || T.gen_writer } : null,
+    people: gp.map((spec, i) => ({ spec, label: isPlayer(spec) ? "" : (gn[i] || spec) })) };
+  for (let c = 0; c < COLS; c++) {
+    const k = "c" + (c + 1) + "_", col = s.cols[c];
+    const specs = L[k + "actors"] || [], names = L[k + "names"] || [], texts = L[k + "lines"] || [], who = N[k + "speakers"];
+    const autos = N[k + "autos"] || [];
+    col.actors = specs.slice(0, PER).map((spec, i) => ({ spec, label: isPlayer(spec) ? "" : (names[i] || spec) }));
+    // Old files have no speaker list: line i belongs to participant i.
+    col.lines = texts.slice(0, MAXLINES).map((text, i) => ({ who: who ? who[i] ?? -1 : i, text, auto: autos[i] === 1 }))
+      .filter((l) => l.text !== "" || l.auto || who);
+    col.auto = !!I[k + "auto"];
+    col.autolen = I[k + "autolen"] ?? 1;
+    col.ostim = I[k + "ostim"] === undefined ? true : !!I[k + "ostim"];
+    col.tags = T[k + "tags"] || ""; col.narrator = T[k + "narrator"] || "";
+    if (col.actors.length) s.shown = c + 1;
+  }
+  return s;
+}
+function toFile(s) {
+  const o = { int: { enabled: s.enabled ? 1 : 0, onlytargets: s.onlytargets ? 1 : 0, repeat: s.repeat ? 1 : 0, location: s.location },
+    float: { intervaldays: Number(s.intervaldays) || 0 }, string: {}, stringList: {}, intList: {} };
+  const g = s.gen || blankGen();
+  o.string.gen_theme = g.theme;
+  o.int.gen_columns = g.columns;
+  if (g.writer) { o.string.gen_writer = g.writer.spec; o.string.gen_writername = g.writer.label; }
+  o.stringList.gen_people = g.people.map((a) => a.spec);
+  o.stringList.gen_names = g.people.map((a) => (isPlayer(a.spec) ? "" : a.label));
+  s.cols.forEach((col, c) => {
+    if (!col.actors.length) return;
+    const k = "c" + (c + 1) + "_";
+    const lines = col.lines.filter((l) => (l.text.trim() !== "" || l.auto) && l.who >= 0 && l.who < col.actors.length);
+    o.int[k + "ostim"] = col.ostim ? 1 : 0;
+    o.int[k + "auto"] = col.auto ? 1 : 0;
+    o.int[k + "autolen"] = col.autolen;
+    o.intList[k + "autos"] = lines.map((l) => (l.auto ? 1 : 0));
+    o.string[k + "narrator"] = col.narrator; o.string[k + "tags"] = col.tags;
+    o.stringList[k + "actors"] = col.actors.map((a) => a.spec);
+    o.stringList[k + "names"] = col.actors.map((a) => isPlayer(a.spec) ? "" : a.label);
+    o.stringList[k + "lines"] = lines.map((l) => l.text);
+    o.intList[k + "speakers"] = lines.map((l) => l.who);
+  });
+  return JSON.stringify(o, null, 2);
+}
+function label(a) { return isPlayer(a.spec) ? "プレイヤー（" + S.player + "）" : a.label; }
+
+// ---------------------------------------------------------------- rendering
+function renderList() {
+  updateSaveBtn();
+  const box = $("list"); box.innerHTML = "";
+  const names = S.order.slice();
+  if (S.draft && S.draft.isNew && !names.includes(S.draft.name)) names.push(S.draft.name);
+  for (const n of names) {
+    const cur = isCurrent(n), s = cur ? S.draft : S.setups[n];
+    const d = document.createElement("div");
+    const on = !!(s && s.enabled);
+    d.className = "item" + (cur ? " sel" : "") + (on ? "" : " off");
+    d.innerHTML = '<span class="nm">' + esc(n) + (s && s.dirty ? " *" : "") + "</span>" +
+      '<input type="checkbox" title="有効／無効"' + (on ? " checked" : "") + ">";
+    const sw = d.querySelector("input");
+    sw.onclick = (e) => e.stopPropagation();
+    sw.onchange = () => setEnabled(n, sw.checked);
+    d.onclick = () => select(n);
+    box.appendChild(d);
+  }
+}
+// The switch in the list. A saved event is written at once (only "enabled" changes in the file;
+// unsaved edits to it stay unsaved). A new event that was never saved just changes its draft.
+function setEnabled(n, on) {
+  const saved = S.setups[n];
+  if (isCurrent(n)) S.draft.enabled = on;
+  if (!saved) { renderList(); return; }
+  saved.enabled = on;
+  S.quick = n;
+  msg("保存しています…");
+  send("dse_save", n + "\n" + toFile(saved));
+  renderList();
+}
+// The entry being edited: a new event goes by its typed name, a saved one by S.sel.
+function isCurrent(n) { return !!S.draft && (S.draft.isNew ? n === S.draft.name : n === S.sel); }
+function select(n) {
+  if (isCurrent(n) || !S.setups[n]) return;
+  if (S.draft && S.draft.dirty && !confirmLeave()) return;
+  S.sel = n; S.draft = clone(S.setups[n]);
+  renderList(); renderEditor(); msg("");
+}
+let leaveArmed = false;
+function confirmLeave() {
+  if (leaveArmed) { leaveArmed = false; return true; }
+  leaveArmed = true; msg("保存していない変更があります。もう一度押すと変更を捨てて移動します。", "err");
+  setTimeout(() => (leaveArmed = false), 4000);
+  return false;
+}
+function touch() { if (!S.draft.dirty) { S.draft.dirty = true; renderList(); } }
+function updateSaveBtn() { $("saveBtn").classList.toggle("dirty", !!(S.draft && S.draft.dirty)); }
+
+function renderEditor() {
+  const ed = $("editor"), d = S.draft;
+  $("saveBtn").disabled = $("delBtn").disabled = !d;
+  if (!d) { ed.innerHTML = '<div id="empty">左の一覧からイベントを選ぶか、「新しいイベント」を押してください。</div>'; return; }
+  let h = "";
+  h += '<div class="row"><span class="lbl">名前</span><input id="f_name" value="' + esc(d.name) + '" maxlength="40"' + (d.isNew ? "" : " disabled") + '>';
+  h += '<span class="hint">半角英数字と _ - だけ（ファイル名になります）</span></div>';
+  h += '<div class="row"><span class="lbl">発火条件</span>';
+  h += '<label><input type="radio" name="f_mode" value="0"' + (!d.onlytargets ? " checked" : "") + "> 対象キャラ以外がいても OK（子供がいるときは発火しない）</label>";
+  h += '<label><input type="radio" name="f_mode" value="1"' + (d.onlytargets ? " checked" : "") + "> 対象キャラのみ</label></div>";
+  h += '<div class="row"><span class="lbl">発火回数</span>';
+  h += '<label><input type="radio" name="f_rep" value="0"' + (!d.repeat ? " checked" : "") + "> 1 回だけ</label>";
+  h += '<label><input type="radio" name="f_rep" value="1"' + (d.repeat ? " checked" : "") + '> 繰り返し</label>';
+  h += '<input id="f_days" type="number" min="0" step="0.5" style="width:80px" value="' + esc(d.intervaldays) + '"' + (d.repeat ? "" : " disabled") + "> 日ごと";
+  h += '<span class="hint">0 にすると、セルを出て入り直すたびに発火します</span></div>';
+  h += '<div class="row"><span class="lbl">場所</span>';
+  [["0", "どちらでも"], ["1", "室内のみ"], ["2", "室外のみ"]].forEach(([v, t]) => {
+    h += '<label><input type="radio" name="f_loc" value="' + v + '"' + (String(d.location) === v ? " checked" : "") + "> " + t + "</label>";
+  });
+  h += "</div>";
+  h += genPanel(d);
+  h += '<div id="cols">';
+  d.cols.slice(0, d.shown).forEach((col, c) => {
+    h += '<div class="col"><h3>' + (c + 1) + " 列目" + (c === 0 ? ' <span class="req">必須</span>' : ' <span class="req">空なら使わない</span>') + "</h3>";
+    h += '<div class="sec"><div class="t">参加キャラ（1〜3 人。別の列と同じキャラでも可。1 人ならタグなしでオナニーのシーン）</div>';
+    for (let i = 0; i < PER; i++) {
+      const a = col.actors[i];
+      if (a) h += '<div class="slot"><button class="pick" data-c="' + c + '" data-i="' + i + '">' + esc(label(a)) + '</button><button class="small" data-rm="' + c + "," + i + '">✕</button></div>';
+      else if (i === col.actors.length) h += '<div class="slot"><button class="pick emptyslot" data-c="' + c + '" data-i="' + i + '">＋ 選ぶ</button></div>';
+    }
+    h += "</div>";
+    h += '<div class="sec"><div class="t">ナレーター（状況の説明。誰も反応せず、会話の背景になります）</div><textarea data-nar="' + c + '" placeholder="例：みんな泥酔している">' + esc(col.narrator) + "</textarea>";
+    // Column auto: every line made up in the game, short / medium / long.
+    h += '<div class="autorow"><label class="switch"><input type="checkbox" data-cauto="' + c + '"' + (col.auto ? " checked" : "") + "> この列のセリフをすべてオート</label>";
+    if (col.auto) {
+      h += '<span class="seg">' + AUTONAMES.map((n, i) => '<button class="small' + (col.autolen === i ? " on" : "") + '" data-alen="' + c + "," + i + '">' + n + "</button>").join("") + "</span>";
+    }
+    h += "</div></div>";
+    if (col.actors.length) {
+      h += '<div class="sec"><div class="t">セリフ（上から順に話します。AI がそのキャラらしく言い換えます。{プレイヤー} は名前になります）</div>';
+      if (col.auto) {
+        h += '<div class="autobox">ナレーションと前後の列、それまでの会話をもとに、AI がその場でセリフを作ります。' +
+          AUTONAMES[col.autolen] + "：" + AUTOLINES[col.autolen] + " 回。参加キャラが順番に話します" + (col.actors.length === 1 ? "（1 人なら独り言）" : "") + "。</div>";
+      } else {
+        col.lines.forEach((l, j) => {
+          h += '<div class="lrow"><div class="lhead"><span class="lno">' + (j + 1) + "</span>";
+          col.actors.forEach((a, i) => {
+            h += '<span class="chip ' + (l.who === i ? "on" : "off") + '" data-who="' + c + "," + j + "," + i + '">' + esc(label(a)) + "</span>";
+          });
+          h += '<span class="ltools"><label class="autosw" title="AI がその場でセリフを作ります"><input type="checkbox" data-lauto="' + c + "," + j + '"' + (l.auto ? " checked" : "") + ">オート</label>" +
+            '<button class="small" data-lup="' + c + "," + j + '"' + (j === 0 ? " disabled" : "") + '>↑</button>' +
+            '<button class="small" data-ldown="' + c + "," + j + '"' + (j === col.lines.length - 1 ? " disabled" : "") + '>↓</button>' +
+            '<button class="small" data-ldel="' + c + "," + j + '">✕</button></span></div>';
+          h += '<div class="lbody' + (l.auto ? " auto" : "") + '"><textarea data-line="' + c + "," + j + '" placeholder="セリフ"' + (l.auto ? " readonly" : "") + ">" + esc(l.text) + "</textarea></div></div>";
+        });
+        if (col.lines.length < MAXLINES) h += '<button class="small" data-ladd="' + c + '">＋ セリフを追加（' + col.lines.length + "/" + MAXLINES + "）</button>";
+      }
+      h += "</div>";
+    }
+    h += '<div class="sec"><label class="switch"><input type="checkbox" data-ostim="' + c + '"' + (col.ostim ? " checked" : "") + "> セリフのあと OStim シーンを始める</label>";
+    h += '<div class="hint">オフにすると、セリフだけの列になります。前の列のシーン中のキャラは、そのシーンを止めてから新しいシーンを始めます（同じシーンにいた全員のシーンが終わります）。</div>';
+    if (col.ostim) {
+      h += '<div class="t" style="margin-top:6px">OStim タグ（どれかに合うシーンを選びます。なしならおまかせ）</div>';
+      h += '<div class="tags">' + tagChips(col.tags, c) + "</div>";
+      h += '<div class="t" style="margin-top:6px">候補にないタグ（カンマ区切り）</div>';
+      h += '<input data-tags="' + c + '" value="' + esc(tagList(col.tags).filter((t) => !TAGS.some((x) => x[0] === t)).join(",")) + '" style="width:100%">';
+    }
+    h += "</div></div>";
+  });
+  if (d.shown < COLS) h += '<div class="addcol"><button id="addCol">＋ 列を追加<br><span class="hint">' + d.shown + "/" + COLS + "</span></button></div>";
+  h += "</div>";
+  ed.innerHTML = h;
+  wire();
+}
+// ---------------------------------------------------------------- generate (the AI writes it all)
+const GEN_MIN = 2, GEN_MAX = 10;
+const SOLO_TAGS = ["femalemasturbation", "malemasturbation", "vaginaltoying", "analtoying"];
+function genPanel(d) {
+  const g = d.gen, busy = !!(S.gen && S.gen.busy);
+  let h = '<div class="genbox"><h2>AI でシナリオを作る（全生成）</h2>';
+  h += '<div class="hint">シナリオライターに選んだ NPC が、その人らしい作風で全部の列（参加キャラ・ナレーション・セリフ・OStim）を書きます。参加者の BIO・記憶・最近の出来事・日記を参考にし、SN Sexual Memories の相関図があればそれも使います。結果は下の列に入るので、確認・修正してから保存してください。</div>';
+  h += '<div class="grow"><span class="lbl">テーマ</span><div class="fld"><textarea id="g_theme" placeholder="例：酒場で再会した二人。昔の誤解が解けて、思いが通じ合う（空欄ならライターにおまかせ）">' + esc(g.theme) + "</textarea></div></div>";
+  h += '<div class="grow"><span class="lbl">シナリオライター</span><div class="fld">' +
+    (g.writer ? '<span class="person">' + esc(g.writer.label) + '<button class="small" id="g_wrm">✕</button></span>' : "") +
+    '<button class="small" id="g_writer">' + (g.writer ? "変える" : "＋ 選ぶ") + "</button>" +
+    '<span class="hint">BIO の性格が作風になります</span></div></div>';
+  h += '<div class="grow"><span class="lbl">参加者（' + GEN_MIN + "〜" + GEN_MAX + ' 人）</span><div class="fld">';
+  g.people.forEach((a, i) => { h += '<span class="person">' + esc(label(a)) + '<button class="small" data-grm="' + i + '">✕</button></span>'; });
+  if (g.people.length < GEN_MAX) h += '<button class="small" id="g_add">＋ 追加</button>';
+  h += "</div></div>";
+  h += '<div class="grow"><span class="lbl">列の数</span><div class="fld"><span class="seg">';
+  for (let n = 1; n <= COLS; n++) h += '<button class="small' + (g.columns === n ? " on" : "") + '" data-gcols="' + n + '">' + n + "</button>";
+  h += "</span></div></div>";
+  h += '<div class="grow"><span class="lbl"></span><div class="fld"><button id="genBtn"' + (busy ? " disabled" : "") + ">✦ 生成する</button>" +
+    '<span id="genstat" class="' + (S.gen ? S.gen.cls || "" : "") + '">' + esc(S.gen ? S.gen.text || "" : "") + "</span></div></div>";
+  return h + "</div>";
+}
+function genStatus(text, cls) {
+  S.gen = Object.assign(S.gen || {}, { text, cls });
+  const s = $("genstat"); if (s) { s.textContent = text; s.className = cls || ""; }
+}
+let genArmed = false;
+function startGenerate() {
+  const d = S.draft, g = d.gen;
+  if (S.gen && S.gen.busy) return;
+  if (!g.writer) { genStatus("シナリオライターを選んでください。", "err"); return; }
+  if (g.people.length < GEN_MIN) { genStatus("参加者を " + GEN_MIN + " 人以上選んでください。", "err"); return; }
+  // Generating replaces the columns: ask again when they already hold something.
+  const filled = d.cols.some((c) => c.actors.length || c.narrator.trim() || c.lines.length);
+  if (filled && !genArmed) {
+    genArmed = true; setTimeout(() => (genArmed = false), 5000);
+    genStatus("今の列の内容は生成結果で置き換わります。よければもう一度「生成する」を押してください。", "err"); return;
+  }
+  genArmed = false;
+  const who = (a) => ({ spec: a.spec, name: isPlayer(a.spec) ? S.player : a.label });
+  const request = {
+    writer: who(g.writer), people: g.people.map(who), columns: g.columns, theme: g.theme.trim(), language: "Japanese",
+    tags: TAGS.filter(([t]) => !SOLO_TAGS.includes(t)).map(([tag, meaning]) => ({ tag, meaning })), solo_tags: SOLO_TAGS,
+  };
+  S.gen = { busy: true, name: d.name, people: g.people.slice() };
+  const btn = $("genBtn"); if (btn) btn.disabled = true;
+  genStatus("生成を始めます…", "");
+  send("dse_generate", JSON.stringify(request));
+}
+const GEN_ERRORS = {
+  nodll: "DLL（SkyrimNet_DialogueScenarioEditor.dll）が読み込まれていないため生成できません。",
+  noapi: "SkyrimNet の機能が見つからないため生成できません。SkyrimNet が動いているか確認してください。",
+  busy: "別の生成がまだ終わっていません。少し待ってください。",
+  nobody: "選んだ人がゲーム内で見つかりませんでした",
+  llm: "AI が答えませんでした。SkyrimNet のダッシュボード「AI > モデル」の dialogue_scenario_writer のモデルを確認してください",
+  badanswer: "AI の答えを読み取れませんでした。もう一度試すか、dialogue_scenario_writer のモデルを変えてください。",
+  badrequest: "生成の依頼を作れませんでした。",
+};
+// From the DLL (through Papyrus): progress, the plan, the result or an error.
+window.dseGen = (m) => {
+  if (!m || typeof m !== "object") return;
+  const g = S.gen || {};
+  if (m.type === "progress") {
+    genStatus("生成中… " + m.step + "/" + m.total + (m.what === "plan" ? "（筋書き）" : "（" + (m.step - 1) + " 列目）"), "");
+    return;
+  }
+  if (m.type === "plan") { genStatus("筋書きができました：「" + (m.title || "") + "」。列を書いています…", ""); return; }
+  if (m.type === "error") {
+    S.gen = { busy: false };
+    genStatus((GEN_ERRORS[m.code] || "生成できませんでした") + (m.detail ? "（" + m.detail + "）" : ""), "err");
+    const btn = $("genBtn"); if (btn) btn.disabled = false;
+    return;
+  }
+  if (m.type !== "done") return;
+  const d = S.draft;
+  const people = g.people || [];
+  // The page may have moved to another event meanwhile: the result belongs to the one it was asked for.
+  if (!d || d.name !== g.name) {
+    S.gen = { busy: false };
+    genStatus("生成は終わりましたが、別のイベントに移ったため反映しませんでした。", "err");
+    return;
+  }
+  const cols = (m.columns || []).slice(0, COLS);
+  d.cols = Array.from({ length: COLS }, blankCol);
+  cols.forEach((r, c) => {
+    const col = d.cols[c];
+    col.actors = (r.cast || []).map((i) => people[i]).filter(Boolean).slice(0, PER).map((a) => ({ spec: a.spec, label: a.label }));
+    col.narrator = r.narrator || "";
+    col.lines = (r.lines || []).slice(0, MAXLINES).map((l) => ({ who: l.who < col.actors.length ? l.who : 0, text: l.text || "", auto: false }));
+    col.ostim = !!r.ostim;
+    col.tags = (r.tags || []).join(",");
+  });
+  d.shown = Math.max(1, cols.length);
+  S.gen = { busy: false };
+  touch(); renderEditor();
+  genStatus("「" + (m.title || d.name) + "」を生成しました。" + (m.plot ? "筋書き：" + m.plot + " " : "") + "内容を確認して保存してください。", "ok");
+};
+function wireGen() {
+  const d = S.draft, g = d.gen;
+  const t = $("g_theme"); if (t) t.oninput = () => { g.theme = t.value; touch(); };
+  const w = $("g_writer"); if (w) w.onclick = () => openPicker("writer");
+  const wr = $("g_wrm"); if (wr) wr.onclick = () => { g.writer = null; touch(); renderEditor(); };
+  const add = $("g_add"); if (add) add.onclick = () => openPicker("people");
+  $("editor").querySelectorAll("[data-grm]").forEach((b) => (b.onclick = () => { g.people.splice(+b.dataset.grm, 1); touch(); renderEditor(); }));
+  $("editor").querySelectorAll("[data-gcols]").forEach((b) => (b.onclick = () => { g.columns = +b.dataset.gcols; touch(); renderEditor(); }));
+  const btn = $("genBtn"); if (btn) btn.onclick = startGenerate;
+}
+
+function tagList(s) { return s.split(",").map((t) => t.trim()).filter(Boolean); }
+// Every known tag as an on/off chip.
+function tagChips(s, c) {
+  const on = tagList(s);
+  return TAGS.map(([t, j]) => '<span class="chip ' + (on.includes(t) ? "on" : "off") + '" data-chip="' + c + '" data-tag="' + t + '" title="' + t + '">' + esc(j) + "</span>").join("");
+}
+function wire() {
+  const d = S.draft, ed = $("editor");
+  const nm = $("f_name"); if (nm) nm.oninput = () => { d.name = nm.value.trim(); touch(); renderListLater(); };
+  ed.querySelectorAll('input[name="f_mode"]').forEach((r) => (r.onchange = () => { d.onlytargets = r.value === "1"; touch(); }));
+  ed.querySelectorAll('input[name="f_rep"]').forEach((r) => (r.onchange = () => { d.repeat = r.value === "1"; touch(); renderEditor(); }));
+  $("f_days").oninput = (e) => { d.intervaldays = e.target.value; touch(); };
+  ed.querySelectorAll("button.pick").forEach((b) => (b.onclick = () => openPicker(+b.dataset.c, +b.dataset.i)));
+  ed.querySelectorAll('input[name="f_loc"]').forEach((r) => (r.onchange = () => { d.location = +r.value; touch(); }));
+  ed.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => {
+    const [c, i] = b.dataset.rm.split(",").map(Number), col = d.cols[c];
+    col.actors.splice(i, 1);
+    // Lines of the removed participant lose their speaker; later participants move up one.
+    col.lines.forEach((l) => { if (l.who === i) l.who = -1; else if (l.who > i) l.who--; });
+    touch(); renderEditor();
+  }));
+  ed.querySelectorAll("[data-nar]").forEach((t) => (t.oninput = () => { d.cols[+t.dataset.nar].narrator = t.value; touch(); }));
+  const cj = (s) => s.split(",").map(Number);
+  ed.querySelectorAll("[data-line]").forEach((t) => (t.oninput = () => { const [c, j] = cj(t.dataset.line); d.cols[c].lines[j].text = t.value; touch(); }));
+  ed.querySelectorAll("[data-who]").forEach((x) => (x.onclick = () => { const [c, j, i] = cj(x.dataset.who); d.cols[c].lines[j].who = i; touch(); renderEditor(); }));
+  ed.querySelectorAll("[data-lauto]").forEach((x) => (x.onchange = () => { const [c, j] = cj(x.dataset.lauto); d.cols[c].lines[j].auto = x.checked; touch(); renderEditor(); }));
+  ed.querySelectorAll("[data-cauto]").forEach((x) => (x.onchange = () => { d.cols[+x.dataset.cauto].auto = x.checked; touch(); renderEditor(); }));
+  ed.querySelectorAll("[data-alen]").forEach((b) => (b.onclick = () => { const [c, i] = cj(b.dataset.alen); d.cols[c].autolen = i; touch(); renderEditor(); }));
+  ed.querySelectorAll("[data-ladd]").forEach((b) => (b.onclick = () => {
+    const col = d.cols[+b.dataset.ladd], last = col.lines[col.lines.length - 1];
+    // Default speaker: the next participant after the previous line's, so a dialogue alternates.
+    const who = last && last.who >= 0 ? (last.who + 1) % col.actors.length : 0;
+    col.lines.push({ who, text: "" }); touch(); renderEditor();
+  }));
+  ed.querySelectorAll("[data-ldel]").forEach((b) => (b.onclick = () => { const [c, j] = cj(b.dataset.ldel); d.cols[c].lines.splice(j, 1); touch(); renderEditor(); }));
+  const swap = (c, a, b) => { const l = d.cols[c].lines; [l[a], l[b]] = [l[b], l[a]]; touch(); renderEditor(); };
+  ed.querySelectorAll("[data-lup]").forEach((b) => (b.onclick = () => { const [c, j] = cj(b.dataset.lup); if (j > 0) swap(c, j, j - 1); }));
+  ed.querySelectorAll("[data-ldown]").forEach((b) => (b.onclick = () => { const [c, j] = cj(b.dataset.ldown); if (j < d.cols[c].lines.length - 1) swap(c, j, j + 1); }));
+  const add = $("addCol"); if (add) add.onclick = () => { d.shown = Math.min(COLS, d.shown + 1); touch(); renderEditor(); $("cols").scrollLeft = 1e6; };
+  ed.querySelectorAll("[data-ostim]").forEach((x) => (x.onchange = () => { d.cols[+x.dataset.ostim].ostim = x.checked; touch(); renderEditor(); }));
+  ed.querySelectorAll("[data-tags]").forEach((x) => (x.onchange = () => {
+    const col = d.cols[+x.dataset.tags];
+    const known = tagList(col.tags).filter((t) => TAGS.some((k) => k[0] === t));
+    col.tags = known.concat(tagList(x.value).filter((t) => !known.includes(t))).join(","); touch();
+  }));
+  ed.querySelectorAll("[data-chip]").forEach((x) => (x.onclick = () => {
+    const col = d.cols[+x.dataset.chip], t = x.dataset.tag, l = tagList(col.tags);
+    col.tags = (l.includes(t) ? l.filter((v) => v !== t) : l.concat(t)).join(","); touch(); renderEditor();
+  }));
+  wireGen();
+}
+let listTimer = 0;
+function renderListLater() { clearTimeout(listTimer); listTimer = setTimeout(renderList, 300); }
+
+// ---------------------------------------------------------------- picker
+// What the picker fills: a column slot (c, i), or for Generate "writer" / "people" (c alone).
+function openPicker(c, i) { S.pick = { c, i }; $("psearch").value = ""; $("picker").classList.add("open"); renderPicker(); setTimeout(() => $("psearch").focus(), 50); }
+function closePicker() { $("picker").classList.remove("open"); S.pick = null; }
+function renderPicker() {
+  if (!S.pick) return;
+  const q = $("psearch").value.trim().toLowerCase();
+  const hit = (n) => !q || n.name.toLowerCase().includes(q) || n.plugin.toLowerCase().includes(q);
+  let h = "";
+  // The scenario writer is an NPC (their profile sets the style).
+  if (S.pick.c !== "writer" && (!q || "プレイヤー".includes(q) || S.player.toLowerCase().includes(q))) {
+    h += '<div class="grp">プレイヤー</div><div class="npc" data-spec="' + PLAYER_SPEC + '"><span>' + esc("プレイヤー（" + S.player + "）") + "</span></div>";
+  }
+  const near = S.nearby.filter(hit);
+  if (near.length) {
+    h += '<div class="grp">近くにいる NPC</div>';
+    for (const n of near) h += npcRow(n);
+  }
+  if (S.npcsLoaded) {
+    const all = S.npcs.filter(hit);
+    h += '<div class="grp">すべての NPC（' + all.length + "）</div>";
+    for (const n of all.slice(0, 400)) h += npcRow(n);
+    if (all.length > 400) h += '<div class="grp" style="color:var(--muted)">ほか ' + (all.length - 400) + " 人。名前で絞り込んでください</div>";
+  }
+  $("plist").innerHTML = h;
+  $("plist").querySelectorAll(".npc").forEach((r) => (r.onclick = () => choose(r.dataset.spec, r.dataset.name || "")));
+}
+function npcRow(n) {
+  return '<div class="npc" data-spec="' + esc(n.spec) + '" data-name="' + esc(n.name) + '"><span>' + esc(n.name) + '</span><span class="pl">' + esc(n.plugin) + "</span></div>";
+}
+function choose(spec, name) {
+  const d = S.draft, { c, i } = S.pick;
+  if (c === "writer") { d.gen.writer = { spec, label: name }; touch(); closePicker(); renderEditor(); return; }
+  if (c === "people") {
+    if (d.gen.people.some((a) => a.spec === spec)) { genStatus("その人はもう参加者にいます。", "err"); closePicker(); return; }
+    d.gen.people.push({ spec, label: name }); touch(); closePicker(); renderEditor(); return;
+  }
+  const col = d.cols[c];
+  // Other columns may use the same character; one column may not list them twice.
+  if (col.actors.some((a, ii) => a.spec === spec && ii !== i)) { msg("その人はこの列にもういます。", "err"); closePicker(); return; }
+  const entry = { spec, label: name };
+  if (col.actors[i]) col.actors[i] = entry; else col.actors.push(entry);
+  touch(); closePicker(); renderEditor(); msg("");
+}
+$("psearch").oninput = renderPicker;
+$("pclose").onclick = closePicker;
+function loadNpcs() {
+  if (S.npcsLoading || S.npcsLoaded) return;
+  S.npcsLoading = true; S.npcs = [];
+  $("pstat").textContent = S.fastNpcs ? "読み込み中…" : "読み込み中…（数分かかることがあります）";
+  send("dse_npcs", "");
+}
+$("pload").onclick = loadNpcs;
+
+// ---------------------------------------------------------------- actions
+function msg(t, cls) { const m = $("msg"); m.textContent = t; m.className = cls || ""; }
+$("newBtn").onclick = () => {
+  if (S.draft && S.draft.dirty && !confirmLeave()) return;
+  let n = 1; while (S.setups["event" + n]) n++;
+  S.draft = blankSetup("event" + n); S.sel = S.draft.name; renderList(); renderEditor(); msg("");
+};
+// Checks the draft and sends it to be written. False (with the reason shown) when it cannot be saved.
+function save() {
+  const d = S.draft; if (!d) return false;
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(d.name)) { msg("名前は半角英数字と _ - だけで付けてください。", "err"); return false; }
+  if (d.isNew && S.setups[d.name]) { msg("同じ名前のイベントがもうあります。", "err"); return false; }
+  if (!d.cols[0].actors.length) { msg("1 列目に参加キャラを 1 人以上選んでください。", "err"); return false; }
+  for (let c = 0; c < COLS; c++) {
+    const col = d.cols[c];
+    // A column with nobody in it is not used (and not saved), even if lines are left over
+    // from participants that were removed.
+    if (!col.actors.length || col.auto) continue;
+    if (col.lines.some((l) => (l.text.trim() !== "" || l.auto) && (l.who < 0 || l.who >= col.actors.length))) {
+      msg((c + 1) + " 列目に、話す人が選ばれていないセリフがあります。", "err"); return false;
+    }
+  }
+  S.sel = d.name;
+  msg("保存しています…");
+  send("dse_save", d.name + "\n" + toFile(d));
+  return true;
+}
+$("saveBtn").onclick = () => { S.closeAfterSave = false; save(); };
+let delArmed = false;
+$("delBtn").onclick = () => {
+  const d = S.draft; if (!d) return;
+  if (d.isNew && !S.setups[d.name]) { S.draft = null; S.sel = null; renderList(); renderEditor(); msg(""); return; }
+  if (!delArmed) { delArmed = true; msg("もう一度「削除」を押すと「" + d.name + "」を削除します。", "err"); setTimeout(() => (delArmed = false), 4000); return; }
+  delArmed = false; send("dse_delete", d.name);
+};
+// Closing: with unsaved changes, ask first (save and close / close without saving / back).
+function confirmOpen() { return $("confirm").classList.contains("open"); }
+function hideConfirm() { $("confirm").classList.remove("open"); }
+function requestClose() {
+  const d = S.draft;
+  if (!d || !d.dirty) { send("dse_close", ""); return; }
+  $("ctext").textContent = "「" + d.name + "」の変更はまだ保存されていません。閉じると変更は失われます。";
+  $("confirm").classList.add("open");
+}
+$("closeBtn").onclick = requestClose;
+$("cBack").onclick = hideConfirm;
+$("cDiscard").onclick = () => {
+  hideConfirm();
+  // drop the changes: a saved event goes back to its file, a new one is gone
+  const d = S.draft;
+  if (d && S.setups[S.sel] && !d.isNew) S.draft = clone(S.setups[S.sel]);
+  else { S.draft = null; S.sel = null; }
+  renderList(); renderEditor(); msg("");
+  send("dse_close", "");
+};
+$("cSave").onclick = () => {
+  hideConfirm();
+  S.closeAfterSave = save();  // closes once the file is written; stays open if it cannot be saved
+};
+// Esc: closes the warning or the NPC picker if one is open, otherwise asks to close the page.
+function onEscape() {
+  if (confirmOpen()) hideConfirm();
+  else if (S.pick) closePicker();
+  else requestClose();
+}
+// Prisma UI: the plugin hears Esc and calls dseEscape(), so the page's own key handler stays out of it.
+window.dseEscape = onEscape;
+// Magelight UI: the page takes Esc (otherwise Magelight closes the page at once, without asking).
+(function takeEscape(tries) {
+  if (window.magelight && typeof window.magelight.send === "function") window.magelight.send("__escapecapture", "1");
+  else if (tries > 0 && !window.prismaUi) setTimeout(() => takeEscape(tries - 1), 200);
+})(25);
+// Acted on when Esc is RELEASED: closing on the press handed the game back its controls while the
+// key was still down, and the game then opened its own Esc menu in the middle of the page
+// closing (it stayed open but was never drawn: the game paused with only a cursor showing).
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !window.prismaUi) e.preventDefault(); });
+document.addEventListener("keyup", (e) => {
+  if (e.key === "Escape" && !window.prismaUi) { e.preventDefault(); onEscape(); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "id": "nightlantern-mods.dialogue-scenario-editor",
+  "type": "bundle",
+  "title": "SkyrimNet Dialogue Scenario Editor",
+  "tagline": "Scenes you write (or let a character write) play out with nearby NPCs: lines, narration and OStim scenes, column by column.",
+  "description": "Prompts for SkyrimNet_DialogueScenarioEditor.dll. On the settings page, Generate asks a chosen NPC (the scenario writer) to write a whole scenario for the chosen people: dse_scenario_plan writes the plot and what happens in each column, then dse_scenario_column writes each column's narration and lines. Both read the people's profiles, memories, latest diary entries and recent events, and the relationship map of SN Sexual Memories when there is one. They run on the variant dialogue_scenario_writer, whose model is set in the dashboard (AI > Models); left empty, it uses the default model.",
+  "author": "nightlantern-mods",
+  "tags": ["prompts"],
+  "nsfw": true,
+  "icon": "sparkles",
+  "version": "0.1.0",
+  "min_skyrimnet_version": "0.25.0",
+  "mods": [
+    { "name": "SkyrimNet Dialogue Scenario Editor", "file": "SkyrimNet_DialogueScenarioEditor.esp", "required": true }
+  ]
+}

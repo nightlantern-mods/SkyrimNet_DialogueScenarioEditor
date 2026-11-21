@@ -1,0 +1,21 @@
+{
+	"modName": "SkyrimNet_DialogueScenarioEditor",
+	"displayName": "$DSE_ModName",
+	"minMcmVersion": 9,
+	"cursorFillMode": "topToBottom",
+	"content": [
+		{
+			"type": "header",
+			"text": "$DSE_HeaderPage"
+		},
+		{
+			"id": "iHotkey:General",
+			"type": "keymap",
+			"text": "$DSE_PageKey",
+			"help": "$DSE_PageKeyHelp",
+			"valueOptions": {
+				"sourceType": "ModSettingInt"
+			}
+		}
+	]
+}
