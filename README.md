@@ -1,4 +1,4 @@
-# SkyrimNet Dialogue Scenario Editor 0.3.0
+# SkyrimNet Dialogue Scenario Editor 0.3.1
 
 > [!CAUTION]
 > **Adult content.** Scenarios can end in sex scenes (OStim or SexLab). For adults only.

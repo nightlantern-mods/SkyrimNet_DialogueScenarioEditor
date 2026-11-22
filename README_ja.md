@@ -1,4 +1,4 @@
-# SkyrimNet Dialogue Scenario Editor 0.3.0（ダイアログシナリオエディタ）
+# SkyrimNet Dialogue Scenario Editor 0.3.1（ダイアログシナリオエディタ）
 
 > [!CAUTION]
 > **成人向けの内容を含みます。** シナリオは性的なシーン（OStim または SexLab）で終わることがあります。18 歳未満の方は使わないでください。

@@ -8,7 +8,7 @@
   "tags": ["prompts"],
   "nsfw": true,
   "icon": "sparkles",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "min_skyrimnet_version": "0.25.0",
   "mods": [
     { "name": "SkyrimNet Dialogue Scenario Editor", "file": "SkyrimNet_DialogueScenarioEditor.esp", "required": true }

@@ -13,8 +13,18 @@ Int Function Version() Global
 	Return SexLabUtil.GetVersion()
 EndFunction
 
+; In a SexLab scene: SexLab's IsActorActive only checks its animating faction, which an actor can
+; keep after a scene that did not end cleanly (2026-11-22: Faendal, standing idle, counted as in a
+; scene). So a thread of theirs must exist too.
 Bool Function IsActive(Quest api, Actor who) Global
-	Return (api as SexLabFramework).IsActorActive(who)
+	SexLabFramework sexLab = api as SexLabFramework
+	Return sexLab.IsActorActive(who) && sexLab.GetActorController(who) != None
+EndFunction
+
+; Only the faction (for the log: a leftover from a scene that did not end cleanly).
+Bool Function InFactionOnly(Quest api, Actor who) Global
+	SexLabFramework sexLab = api as SexLabFramework
+	Return sexLab.IsActorActive(who) && sexLab.GetActorController(who) == None
 EndFunction
 
 ; Ends the SexLab scene the actor is in (everyone in it leaves it). Returns whether there was one.

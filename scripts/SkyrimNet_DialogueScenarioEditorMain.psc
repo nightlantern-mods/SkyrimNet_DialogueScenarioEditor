@@ -308,6 +308,13 @@ EndFunction
 ; Enabled, not used up, past its interval, and not blocked in the cell it last fired in.
 bool Function IsReady(string file, Cell here)
 	why = ""
+	; Leaving the cell it last ran in ends the once-per-visit block, whatever else stops it now: this
+	; is checked first, so a scenario set to indoors only still has its block cleared while the player
+	; is outdoors (it used to be cleared only when every check before it passed, 2026-11-22).
+	Form lastCell = StorageUtil.GetFormValue(self, StateKey(file) + ":cell")
+	If lastCell != None && lastCell != here
+		StorageUtil.UnsetFormValue(self, StateKey(file) + ":cell")
+	EndIf
 	If JsonUtil.GetIntValue(file, "enabled", 0) == 0
 		why = "switched off"
 		Return false
@@ -428,8 +435,11 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 				why = a.GetDisplayName() + " is in combat"
 				Return false
 			EndIf
+			If slApi != None && SkyrimNet_DialogueScenarioEditorSL.InFactionOnly(slApi, a)
+				Because(file, a.GetDisplayName() + " is in SexLab's animating faction with no SexLab scene (left over from a scene that did not end cleanly): not counted as in a scene")
+			EndIf
 			If InScene(a)
-				why = a.GetDisplayName() + " is in a sex scene"
+				why = a.GetDisplayName() + " is in a sex scene (" + SceneFramework(a) + ")"
 				Return false
 			EndIf
 			slots[colStart + k] = a
@@ -1155,7 +1165,7 @@ string Function LeftAlone(Actor a)
 		Return ""
 	EndIf
 	If InScene(a)
-		Return "in a sex scene"
+		Return "in a sex scene (" + SceneFramework(a) + ")"
 	ElseIf a.IsInCombat()
 		Return "fighting"
 	ElseIf StorageUtil.FormListHas(self, TouchedList, a)
@@ -1647,6 +1657,21 @@ bool Function InScene(Actor a)
 		Return true
 	EndIf
 	Return slApi != None && SkyrimNet_DialogueScenarioEditorSL.IsActive(slApi, a)
+EndFunction
+
+; Which framework says the actor is in a scene, for the log.
+string Function SceneFramework(Actor a)
+	string s = ""
+	If hasOStim && SkyrimNet_DialogueScenarioEditorOS.IsInScene(a)
+		s = "OStim says so"
+	EndIf
+	If slApi != None && SkyrimNet_DialogueScenarioEditorSL.IsActive(slApi, a)
+		If s != ""
+			s += ", "
+		EndIf
+		s += "SexLab IsActorActive says so"
+	EndIf
+	Return s
 EndFunction
 
 bool Function AnyInScene(Actor[] cast)

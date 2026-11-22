@@ -422,10 +422,14 @@ Event OnPageSave(string eventName, string strArg, float numArg, Form sender)
 	EndIf
 	; A new scenario (no file yet, or an emptied / deleted one): any run record under this name is
 	; an old scenario's, and must not keep the new one from starting.
-	bool isNew = StringUtil.Find(MiscUtil.ReadFromFile(SetupDisk + name + ".json"), "{") < 0 || JsonUtil.StringListHas(DeletedFile, "names", name)
+	string oldText = MiscUtil.ReadFromFile(SetupDisk + name + ".json")
+	bool isNew = StringUtil.Find(oldText, "{") < 0 || JsonUtil.StringListHas(DeletedFile, "names", name)
+	; A scenario whose content changed (not just its on/off switch, which the list saves the same
+	; way) is a new scenario to try: its run record goes too, so it can start again after an edit.
+	bool changed = !isNew && WithoutSwitch(oldText) != WithoutSwitch(text)
 	bool ok = MiscUtil.WriteToFile(SetupDisk + name + ".json", text, false, false)
 	JsonUtil.Unload(SetupFolder + "/" + name, false)
-	If ok && isNew
+	If ok && (isNew || changed)
 		((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).ForgetRuns(name)
 	EndIf
 	Log("saved " + name + " (" + StringUtil.GetLength(text) + " chars, ok " + ok + ")")
@@ -437,6 +441,12 @@ Event OnPageSave(string eventName, string strArg, float numArg, Form sender)
 	Js(view, "dseSaved(\"" + name + "\"," + (ok as int) + ")")
 EndEvent
 
+; The file text with its "enabled" value left out, so a change of the list switch alone does not
+; count as a changed scenario.
+string Function WithoutSwitch(string text)
+	text = Swap(text, "\"enabled\": 1", "\"enabled\": x")
+	Return Swap(text, "\"enabled\": 0", "\"enabled\": x")
+EndFunction
 ; Payload: "<name>". The file is emptied (PapyrusUtil cannot delete); empty files are ignored.
 ; The name also goes into the deleted list, so a shipped example the mod's files bring back on a
 ; reinstall or update stays deleted.
