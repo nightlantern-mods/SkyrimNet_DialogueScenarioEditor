@@ -90,6 +90,15 @@ label { cursor: pointer; }
 .seg button.on { background: #1f6b3c; border-color: #5df08f; color: #fff; }
 .autobox { position: relative; border: 1px dashed #5df08f; border-radius: 6px; padding: 10px 8px 52px; color: var(--muted); font-size: 12px; }
 .autobox::after { inset: auto 0 8px 0; height: 40px; }
+/* Pull-down (Magelight UI cannot show <select>): the list opens in place, below the button */
+.dd { display: inline-block; vertical-align: top; }
+.ddbtn { min-width: 180px; text-align: left; display: inline-flex; justify-content: space-between; gap: 10px; }
+.ddarrow { color: var(--muted); }
+.ddlist { display: none; margin-top: 2px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; max-height: 220px; overflow-y: auto; }
+.dd.open .ddlist { display: block; }
+.ddopt { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; background: transparent; padding: 6px 10px; }
+.ddopt:hover { background: var(--panel2); }
+.ddopt.on { color: var(--accent); font-weight: 600; }
 /* Generate: the AI writes the whole scenario */
 .genbox { margin-top: 14px; border: 1px solid #3b6d8f; border-radius: 8px; background: rgba(60, 110, 150, 0.08); padding: 10px 12px; }
 .genbox h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent2); }
@@ -100,7 +109,8 @@ label { cursor: pointer; }
 .person { display: inline-flex; align-items: center; gap: 4px; background: #2c3240; border-radius: 12px; padding: 2px 4px 2px 10px; font-size: 13px; }
 .person button { padding: 0 6px; }
 #genBtn { font-weight: 700; padding: 6px 22px; background: linear-gradient(#5d9bd0, #3b6d8f); border: 2px solid #9cc8ee; color: #fff; }
-#genBtn:disabled { opacity: 0.4; }
+#genLtdBtn { font-weight: 700; padding: 6px 16px; background: linear-gradient(#4f8a7a, #2f6556); border: 2px solid #8fd0bd; color: #fff; }
+#genBtn:disabled, #genLtdBtn:disabled { opacity: 0.4; }
 #genstat { font-size: 13px; color: var(--muted); }
 #genstat.err { color: var(--danger); }
 #genstat.ok { color: var(--ok); }
@@ -281,11 +291,16 @@ function clone(o) { return JSON.parse(JSON.stringify(o)); }
 // -1 when not chosen yet, text, auto: made up in the game }), narration, OStim on/off and tags.
 // auto: every line of the column is made up in the game, AUTOLINES[autolen] of them.
 const AUTOLINES = [3, 6, 10], AUTONAMES = ["短", "中", "長"];
-function blankCol() { return { actors: [], lines: [], ostim: true, tags: "", narrator: "", auto: false, autolen: 1 }; }
+// What ends a column (end): 0 nothing, 1 an OStim scene (tags), 2 move and wait (move: who =
+// participant indexes, place = {spec, label} from the DLL's list, until = a scenario name or "",
+// days = longest wait). More kinds can be added to ENDS.
+const ENDS = [[0, "なし（セリフだけ）"], [1, "OStim シーン"], [2, "移動して待機"]];
+function blankMove() { return { who: [], place: null, until: "", days: 3 }; }
+function blankCol() { return { actors: [], lines: [], end: 1, tags: "", narrator: "", auto: false, autolen: 1, move: blankMove() }; }
 // gen: what Generate was (or will be) asked with, kept with the setup so it can be run again.
 function blankGen() { return { theme: "", writer: null, people: [], columns: 3 }; }
 function blankSetup(name) {
-  return { name, enabled: true, onlytargets: false, repeat: false, intervaldays: 1, location: 0, shown: 1,
+  return { name, enabled: true, trigger: 0, onlytargets: false, repeat: false, intervaldays: 1, location: 0, cell: null, shown: 1, requires: "",
     cols: Array.from({ length: COLS }, blankCol), gen: blankGen(), dirty: true, isNew: true };
 }
 function isPlayer(spec) { return ["player", "{player}", "プレイヤー", "{プレイヤー}"].includes(spec); }
@@ -295,6 +310,9 @@ function fromFile(name, o) {
   s.enabled = !!I.enabled; s.onlytargets = !!I.onlytargets; s.repeat = !!I.repeat;
   s.intervaldays = F.intervaldays ?? I.intervaldays ?? 1;
   s.location = I.location || 0;
+  s.trigger = I.trigger || 0;
+  s.cell = T.cell ? { spec: T.cell, label: T.cellname || T.cell } : null;
+  s.requires = T.requires || "";
   const gp = L.gen_people || [], gn = L.gen_names || [];
   s.gen = { theme: T.gen_theme || "", columns: I.gen_columns || 3,
     writer: T.gen_writer ? { spec: T.gen_writer, label: T.gen_writername || T.gen_writer } : null,
@@ -309,14 +327,17 @@ function fromFile(name, o) {
       .filter((l) => l.text !== "" || l.auto || who);
     col.auto = !!I[k + "auto"];
     col.autolen = I[k + "autolen"] ?? 1;
-    col.ostim = I[k + "ostim"] === undefined ? true : !!I[k + "ostim"];
+    // Older files have only cN_ostim.
+    col.end = I[k + "end"] ?? (I[k + "ostim"] === undefined ? 1 : (I[k + "ostim"] ? 1 : 0));
+    col.move = { who: (N[k + "movewho"] || []).slice(), until: T[k + "moveuntil"] || "", days: F[k + "movedays"] ?? 3,
+      place: T[k + "moveplace"] ? { spec: T[k + "moveplace"], label: T[k + "moveplacename"] || T[k + "moveplace"] } : null };
     col.tags = T[k + "tags"] || ""; col.narrator = T[k + "narrator"] || "";
     if (col.actors.length) s.shown = c + 1;
   }
   return s;
 }
 function toFile(s) {
-  const o = { int: { enabled: s.enabled ? 1 : 0, onlytargets: s.onlytargets ? 1 : 0, repeat: s.repeat ? 1 : 0, location: s.location },
+  const o = { int: { enabled: s.enabled ? 1 : 0, trigger: s.trigger ? 1 : 0, onlytargets: s.onlytargets ? 1 : 0, repeat: s.repeat ? 1 : 0, location: s.location },
     float: { intervaldays: Number(s.intervaldays) || 0 }, string: {}, stringList: {}, intList: {} };
   const g = s.gen || blankGen();
   o.string.gen_theme = g.theme;
@@ -324,11 +345,21 @@ function toFile(s) {
   if (g.writer) { o.string.gen_writer = g.writer.spec; o.string.gen_writername = g.writer.label; }
   o.stringList.gen_people = g.people.map((a) => a.spec);
   o.stringList.gen_names = g.people.map((a) => (isPlayer(a.spec) ? "" : a.label));
+  if (s.requires) o.string.requires = s.requires;
+  if (s.cell) { o.string.cell = s.cell.spec; o.string.cellname = s.cell.label; }
   s.cols.forEach((col, c) => {
     if (!col.actors.length) return;
     const k = "c" + (c + 1) + "_";
     const lines = col.lines.filter((l) => (l.text.trim() !== "" || l.auto) && l.who >= 0 && l.who < col.actors.length);
-    o.int[k + "ostim"] = col.ostim ? 1 : 0;
+    o.int[k + "end"] = col.end;
+    o.int[k + "ostim"] = col.end === 1 ? 1 : 0; // for older builds
+    if (col.end === 2) {
+      const m = col.move;
+      o.intList[k + "movewho"] = m.who.filter((i) => i < col.actors.length && !isPlayer(col.actors[i].spec));
+      if (m.place) { o.string[k + "moveplace"] = m.place.spec; o.string[k + "moveplacename"] = m.place.label; }
+      o.string[k + "moveuntil"] = m.until;
+      o.float[k + "movedays"] = Number(m.days) || 0;
+    }
     o.int[k + "auto"] = col.auto ? 1 : 0;
     o.int[k + "autolen"] = col.autolen;
     o.intList[k + "autos"] = lines.map((l) => (l.auto ? 1 : 0));
@@ -399,8 +430,12 @@ function renderEditor() {
   let h = "";
   h += '<div class="row"><span class="lbl">名前</span><input id="f_name" value="' + esc(d.name) + '" maxlength="40"' + (d.isNew ? "" : " disabled") + '>';
   h += '<span class="hint">半角英数字と _ - だけ（ファイル名になります）</span></div>';
+  h += '<div class="row"><span class="lbl">発火方法</span>';
+  h += '<label><input type="radio" name="f_trig" value="0"' + (!d.trigger ? " checked" : "") + "> 自動</label>";
+  h += '<label><input type="radio" name="f_trig" value="1"' + (d.trigger ? " checked" : "") + "> ホットキー</label>";
+  h += '<span class="hint">' + (d.trigger ? "MCM で決めたキーを押したとき、条件がそろっていれば始まります（同じセルでも何度でも）" : "条件がそろうと自動で始まります") + "</span></div>";
   h += '<div class="row"><span class="lbl">発火条件</span>';
-  h += '<label><input type="radio" name="f_mode" value="0"' + (!d.onlytargets ? " checked" : "") + "> 対象キャラ以外がいても OK（子供がいるときは発火しない）</label>";
+  h += '<label><input type="radio" name="f_mode" value="0"' + (!d.onlytargets ? " checked" : "") + "> 対象キャラ以外がいても OK</label>";
   h += '<label><input type="radio" name="f_mode" value="1"' + (d.onlytargets ? " checked" : "") + "> 対象キャラのみ</label></div>";
   h += '<div class="row"><span class="lbl">発火回数</span>';
   h += '<label><input type="radio" name="f_rep" value="0"' + (!d.repeat ? " checked" : "") + "> 1 回だけ</label>";
@@ -412,6 +447,13 @@ function renderEditor() {
     h += '<label><input type="radio" name="f_loc" value="' + v + '"' + (String(d.location) === v ? " checked" : "") + "> " + t + "</label>";
   });
   h += "</div>";
+  h += '<div class="row"><span class="lbl">セル</span>' +
+    (d.cell ? '<span class="person">' + esc(d.cell.label) + '<button class="small" id="f_cellrm">✕</button></span>' : '<span class="hint">指定なし（どのセルでも）</span>') +
+    '<button class="small" id="f_cell">室内の場所から選ぶ</button><button class="small" id="f_here">今いるセル</button>' +
+    '<span class="hint">指定すると、そのセルにいるときだけ始まります。屋外のセルは狭い範囲（一辺およそ 60 m）です</span></div>';
+  h += '<div class="row"><span class="lbl">前提</span>' +
+    dropdown("requires", d.requires, [["", "なし"]].concat(otherScenarios(d).map((n) => [n, n + " が起きたあと"])), "") +
+    '<span class="hint">選んだシナリオが一度終わるまで、このシナリオは発火しません</span></div>';
   h += genPanel(d);
   h += '<div id="cols">';
   d.cols.slice(0, d.shown).forEach((col, c) => {
@@ -451,13 +493,17 @@ function renderEditor() {
       }
       h += "</div>";
     }
-    h += '<div class="sec"><label class="switch"><input type="checkbox" data-ostim="' + c + '"' + (col.ostim ? " checked" : "") + "> セリフのあと OStim シーンを始める</label>";
-    h += '<div class="hint">オフにすると、セリフだけの列になります。前の列のシーン中のキャラは、そのシーンを止めてから新しいシーンを始めます（同じシーンにいた全員のシーンが終わります）。</div>';
-    if (col.ostim) {
+    h += '<div class="sec"><div class="t">列の最後に</div>' + dropdown("end:" + c, col.end, ENDS, "");
+    if (col.end === 1) {
+      h += '<div class="hint">前の列のシーン中のキャラは、そのシーンを止めてから新しいシーンを始めます（同じシーンにいた全員のシーンが終わります）。</div>';
       h += '<div class="t" style="margin-top:6px">OStim タグ（どれかに合うシーンを選びます。なしならおまかせ）</div>';
       h += '<div class="tags">' + tagChips(col.tags, c) + "</div>";
       h += '<div class="t" style="margin-top:6px">候補にないタグ（カンマ区切り）</div>';
       h += '<input data-tags="' + c + '" value="' + esc(tagList(col.tags).filter((t) => !TAGS.some((x) => x[0] === t)).join(",")) + '" style="width:100%">';
+    } else if (col.end === 2) {
+      h += moveForm(d, col, c);
+    } else {
+      h += '<div class="hint">セリフだけの列になります。</div>';
     }
     h += "</div></div>";
   });
@@ -466,13 +512,83 @@ function renderEditor() {
   ed.innerHTML = h;
   wire();
 }
+// ---------------------------------------------------------------- pull-down (Magelight UI cannot show <select>)
+// key says what it sets (see pickDropdown); options are [value, text].
+function dropdown(key, value, options, empty) {
+  const cur = options.find((o) => o[0] === value);
+  return '<span class="dd" data-dd="' + esc(key) + '"><button type="button" class="ddbtn">' + esc(cur ? cur[1] : empty) + '<span class="ddarrow">▾</span></button>' +
+    '<span class="ddlist">' + options.map(([v, t]) => '<button type="button" class="ddopt' + (v === value ? " on" : "") + '" data-ddv="' + esc(String(v)) + '">' + esc(t) + "</button>").join("") + "</span></span>";
+}
+function pickDropdown(key, raw) {
+  const d = S.draft, [kind, at] = key.split(":");
+  if (kind === "end") d.cols[+at].end = +raw;
+  else if (kind === "until") d.cols[+at].move.until = raw;
+  else if (kind === "requires") d.requires = raw;
+  touch(); renderEditor();
+}
+function wireDropdowns(root) {
+  root.querySelectorAll(".dd .ddbtn").forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    const dd = b.parentElement, open = dd.classList.contains("open");
+    document.querySelectorAll(".dd.open").forEach((x) => x.classList.remove("open"));
+    if (!open) dd.classList.add("open");
+  }));
+  root.querySelectorAll(".dd .ddopt").forEach((o) => (o.onclick = (e) => {
+    e.stopPropagation();
+    pickDropdown(o.closest(".dd").dataset.dd, o.dataset.ddv);
+  }));
+}
+document.addEventListener("click", () => document.querySelectorAll(".dd.open").forEach((x) => x.classList.remove("open")));
+function otherScenarios(d) { return S.order.filter((n) => n !== d.name); }
+
+// ---------------------------------------------------------------- move and wait (a column's end)
+function moveForm(d, col, c) {
+  const m = col.move;
+  let h = '<div class="t" style="margin-top:8px">移動する人</div><div class="tags">';
+  col.actors.forEach((a, i) => {
+    if (isPlayer(a.spec)) return;
+    h += '<span class="chip ' + (m.who.includes(i) ? "on" : "off") + '" data-mwho="' + c + "," + i + '">' + esc(label(a)) + "</span>";
+  });
+  h += "</div>";
+  h += '<div class="t" style="margin-top:8px">行き先（室内の場所）</div>';
+  h += '<button class="small" data-mplace="' + c + '">' + (m.place ? esc(m.place.label) + "（変える）" : "＋ 場所を選ぶ") + "</button>";
+  h += '<div class="t" style="margin-top:8px">いつまで待つか（早い方で終わります）</div>';
+  h += dropdown("until:" + c, m.until, [["", "シナリオは指定しない"]].concat(otherScenarios(d).map((n) => [n, n + " が終わるまで"])), "");
+  h += '<div style="margin-top:6px"><input type="number" min="0" step="0.5" style="width:70px" data-mdays="' + c + '" value="' + esc(m.days) + '"> 日たつまで<span class="hint">（0 なら日数の期限なし）</span></div>';
+  h += '<div class="hint" style="margin-top:6px">選んだ人は列の最後に行き先へ歩いて向かい、そこで待ちます。ゲーム内で 1 時間たっても着かない人は、見えないところで移動させます。待機が終わると、元の生活に戻ります。プレイヤーは移動しません。</div>';
+  return h;
+}
+function wireMove() {
+  const d = S.draft, ed = $("editor"), cj = (s) => s.split(",").map(Number);
+  ed.querySelectorAll("[data-mwho]").forEach((x) => (x.onclick = () => {
+    const [c, i] = cj(x.dataset.mwho), w = d.cols[c].move.who;
+    d.cols[c].move.who = w.includes(i) ? w.filter((v) => v !== i) : w.concat(i);
+    touch(); renderEditor();
+  }));
+  ed.querySelectorAll("[data-mplace]").forEach((b) => (b.onclick = () => openPicker("place", +b.dataset.mplace)));
+  ed.querySelectorAll("[data-mdays]").forEach((x) => (x.oninput = () => { d.cols[+x.dataset.mdays].move.days = x.value; touch(); }));
+}
+// The player's cell for the scenario's cell condition (from the DLL): [spec, name, interior], or null.
+window.dseHere = (here) => {
+  const d = S.draft;
+  if (!d || d.name !== S.hereFor) return;
+  if (!Array.isArray(here) || !here[0]) { msg("今いるセルを調べられませんでした（DLL が必要です）。", "err"); return; }
+  d.cell = { spec: here[0], label: here[1] || here[0] };
+  touch(); renderEditor(); msg("セルを「" + d.cell.label + "」にしました。");
+};
+// The places (from the DLL): [spec, name, editorID]. undefined: not asked yet; null: no DLL.
+window.dsePlaces = (list) => {
+  S.places = Array.isArray(list) ? list.map(([spec, name, editorID]) => ({ spec, name, editorID: editorID || "" })) : null;
+  renderPicker();
+};
+
 // ---------------------------------------------------------------- generate (the AI writes it all)
 const GEN_MIN = 2, GEN_MAX = 10;
 const SOLO_TAGS = ["femalemasturbation", "malemasturbation", "vaginaltoying", "analtoying"];
 function genPanel(d) {
   const g = d.gen, busy = !!(S.gen && S.gen.busy);
-  let h = '<div class="genbox"><h2>AI でシナリオを作る（全生成）</h2>';
-  h += '<div class="hint">シナリオライターに選んだ NPC が、その人らしい作風で全部の列（参加キャラ・ナレーション・セリフ・OStim）を書きます。参加者の BIO・記憶・最近の出来事・日記を参考にし、SN Sexual Memories の相関図があればそれも使います。結果は下の列に入るので、確認・修正してから保存してください。</div>';
+  let h = '<div class="genbox"><h2>AI でシナリオを作る</h2>';
+  h += '<div class="hint">シナリオライターに選んだ NPC が、その人らしい作風で全部の列を書きます。「全生成」は参加キャラ・ナレーション・セリフ・OStim（タグ）のすべてを書きます。「限定生成」は参加キャラ・ナレーション・OStim（タグ）だけを書き、セリフはオート（中）にします（ゲーム内でその場で作られます）。参加者の BIO・記憶・最近の出来事・日記を参考にし、SN Sexual Memories の相関図があればそれも使います。結果は下の列に入るので、確認・修正してから保存してください。</div>';
   h += '<div class="grow"><span class="lbl">テーマ</span><div class="fld"><textarea id="g_theme" placeholder="例：酒場で再会した二人。昔の誤解が解けて、思いが通じ合う（空欄ならライターにおまかせ）">' + esc(g.theme) + "</textarea></div></div>";
   h += '<div class="grow"><span class="lbl">シナリオライター</span><div class="fld">' +
     (g.writer ? '<span class="person">' + esc(g.writer.label) + '<button class="small" id="g_wrm">✕</button></span>' : "") +
@@ -485,7 +601,8 @@ function genPanel(d) {
   h += '<div class="grow"><span class="lbl">列の数</span><div class="fld"><span class="seg">';
   for (let n = 1; n <= COLS; n++) h += '<button class="small' + (g.columns === n ? " on" : "") + '" data-gcols="' + n + '">' + n + "</button>";
   h += "</span></div></div>";
-  h += '<div class="grow"><span class="lbl"></span><div class="fld"><button id="genBtn"' + (busy ? " disabled" : "") + ">✦ 生成する</button>" +
+  h += '<div class="grow"><span class="lbl"></span><div class="fld"><button id="genBtn"' + (busy ? " disabled" : "") + ">✦ 全生成</button>" +
+    '<button id="genLtdBtn"' + (busy ? " disabled" : "") + ">✦ 限定生成（セリフはオート）</button>" +
     '<span id="genstat" class="' + (S.gen ? S.gen.cls || "" : "") + '">' + esc(S.gen ? S.gen.text || "" : "") + "</span></div></div>";
   return h + "</div>";
 }
@@ -494,26 +611,31 @@ function genStatus(text, cls) {
   const s = $("genstat"); if (s) { s.textContent = text; s.className = cls || ""; }
 }
 let genArmed = false;
-function startGenerate() {
+function genButtons(off) { ["genBtn", "genLtdBtn"].forEach((id) => { const b = $(id); if (b) b.disabled = off; }); }
+// limited: the AI writes the cast, narration and OStim (tags) only; every column's lines become auto (medium).
+function startGenerate(limited) {
+  limited = limited === true;
   const d = S.draft, g = d.gen;
   if (S.gen && S.gen.busy) return;
   if (!g.writer) { genStatus("シナリオライターを選んでください。", "err"); return; }
   if (g.people.length < GEN_MIN) { genStatus("参加者を " + GEN_MIN + " 人以上選んでください。", "err"); return; }
   // Generating replaces the columns: ask again when they already hold something.
   const filled = d.cols.some((c) => c.actors.length || c.narrator.trim() || c.lines.length);
-  if (filled && !genArmed) {
-    genArmed = true; setTimeout(() => (genArmed = false), 5000);
-    genStatus("今の列の内容は生成結果で置き換わります。よければもう一度「生成する」を押してください。", "err"); return;
+  const which = limited ? "限定生成" : "全生成";
+  if (filled && genArmed !== which) {
+    genArmed = which; setTimeout(() => (genArmed = false), 5000);
+    genStatus("今の列の内容は生成結果で置き換わります。よければもう一度「" + which + "」を押してください。", "err"); return;
   }
   genArmed = false;
   const who = (a) => ({ spec: a.spec, name: isPlayer(a.spec) ? S.player : a.label });
   const request = {
     writer: who(g.writer), people: g.people.map(who), columns: g.columns, theme: g.theme.trim(), language: "Japanese",
     tags: TAGS.filter(([t]) => !SOLO_TAGS.includes(t)).map(([tag, meaning]) => ({ tag, meaning })), solo_tags: SOLO_TAGS,
+    limited,
   };
-  S.gen = { busy: true, name: d.name, people: g.people.slice() };
-  const btn = $("genBtn"); if (btn) btn.disabled = true;
-  genStatus("生成を始めます…", "");
+  S.gen = { busy: true, name: d.name, people: g.people.slice(), limited };
+  genButtons(true);
+  genStatus(which + "を始めます…", "");
   send("dse_generate", JSON.stringify(request));
 }
 const GEN_ERRORS = {
@@ -537,7 +659,7 @@ window.dseGen = (m) => {
   if (m.type === "error") {
     S.gen = { busy: false };
     genStatus((GEN_ERRORS[m.code] || "生成できませんでした") + (m.detail ? "（" + m.detail + "）" : ""), "err");
-    const btn = $("genBtn"); if (btn) btn.disabled = false;
+    genButtons(false);
     return;
   }
   if (m.type !== "done") return;
@@ -555,14 +677,20 @@ window.dseGen = (m) => {
     const col = d.cols[c];
     col.actors = (r.cast || []).map((i) => people[i]).filter(Boolean).slice(0, PER).map((a) => ({ spec: a.spec, label: a.label }));
     col.narrator = r.narrator || "";
-    col.lines = (r.lines || []).slice(0, MAXLINES).map((l) => ({ who: l.who < col.actors.length ? l.who : 0, text: l.text || "", auto: false }));
-    col.ostim = !!r.ostim;
+    if (g.limited) {
+      col.lines = [];
+      col.auto = true;
+      col.autolen = 1; // medium
+    } else {
+      col.lines = (r.lines || []).slice(0, MAXLINES).map((l) => ({ who: l.who < col.actors.length ? l.who : 0, text: l.text || "", auto: false }));
+    }
+    col.end = r.ostim ? 1 : 0;
     col.tags = (r.tags || []).join(",");
   });
   d.shown = Math.max(1, cols.length);
   S.gen = { busy: false };
   touch(); renderEditor();
-  genStatus("「" + (m.title || d.name) + "」を生成しました。" + (m.plot ? "筋書き：" + m.plot + " " : "") + "内容を確認して保存してください。", "ok");
+  genStatus("「" + (m.title || d.name) + "」を" + (g.limited ? "限定生成しました（セリフはオート・中）。" : "生成しました。") + (m.plot ? "筋書き：" + m.plot + " " : "") + "内容を確認して保存してください。", "ok");
 };
 function wireGen() {
   const d = S.draft, g = d.gen;
@@ -572,7 +700,8 @@ function wireGen() {
   const add = $("g_add"); if (add) add.onclick = () => openPicker("people");
   $("editor").querySelectorAll("[data-grm]").forEach((b) => (b.onclick = () => { g.people.splice(+b.dataset.grm, 1); touch(); renderEditor(); }));
   $("editor").querySelectorAll("[data-gcols]").forEach((b) => (b.onclick = () => { g.columns = +b.dataset.gcols; touch(); renderEditor(); }));
-  const btn = $("genBtn"); if (btn) btn.onclick = startGenerate;
+  const btn = $("genBtn"); if (btn) btn.onclick = () => startGenerate(false);
+  const ltd = $("genLtdBtn"); if (ltd) ltd.onclick = () => startGenerate(true);
 }
 
 function tagList(s) { return s.split(",").map((t) => t.trim()).filter(Boolean); }
@@ -589,11 +718,16 @@ function wire() {
   $("f_days").oninput = (e) => { d.intervaldays = e.target.value; touch(); };
   ed.querySelectorAll("button.pick").forEach((b) => (b.onclick = () => openPicker(+b.dataset.c, +b.dataset.i)));
   ed.querySelectorAll('input[name="f_loc"]').forEach((r) => (r.onchange = () => { d.location = +r.value; touch(); }));
+  ed.querySelectorAll('input[name="f_trig"]').forEach((r) => (r.onchange = () => { d.trigger = +r.value; touch(); renderEditor(); }));
+  const cellBtn = $("f_cell"); if (cellBtn) cellBtn.onclick = () => openPicker("cell");
+  const cellRm = $("f_cellrm"); if (cellRm) cellRm.onclick = () => { d.cell = null; touch(); renderEditor(); };
+  const hereBtn = $("f_here"); if (hereBtn) hereBtn.onclick = () => { S.hereFor = d.name; msg("今いるセルを調べています…"); send("dse_here", ""); };
   ed.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => {
     const [c, i] = b.dataset.rm.split(",").map(Number), col = d.cols[c];
     col.actors.splice(i, 1);
     // Lines of the removed participant lose their speaker; later participants move up one.
     col.lines.forEach((l) => { if (l.who === i) l.who = -1; else if (l.who > i) l.who--; });
+    col.move.who = col.move.who.filter((v) => v !== i).map((v) => (v > i ? v - 1 : v));
     touch(); renderEditor();
   }));
   ed.querySelectorAll("[data-nar]").forEach((t) => (t.oninput = () => { d.cols[+t.dataset.nar].narrator = t.value; touch(); }));
@@ -614,7 +748,6 @@ function wire() {
   ed.querySelectorAll("[data-lup]").forEach((b) => (b.onclick = () => { const [c, j] = cj(b.dataset.lup); if (j > 0) swap(c, j, j - 1); }));
   ed.querySelectorAll("[data-ldown]").forEach((b) => (b.onclick = () => { const [c, j] = cj(b.dataset.ldown); if (j < d.cols[c].lines.length - 1) swap(c, j, j + 1); }));
   const add = $("addCol"); if (add) add.onclick = () => { d.shown = Math.min(COLS, d.shown + 1); touch(); renderEditor(); $("cols").scrollLeft = 1e6; };
-  ed.querySelectorAll("[data-ostim]").forEach((x) => (x.onchange = () => { d.cols[+x.dataset.ostim].ostim = x.checked; touch(); renderEditor(); }));
   ed.querySelectorAll("[data-tags]").forEach((x) => (x.onchange = () => {
     const col = d.cols[+x.dataset.tags];
     const known = tagList(col.tags).filter((t) => TAGS.some((k) => k[0] === t));
@@ -625,6 +758,8 @@ function wire() {
     col.tags = (l.includes(t) ? l.filter((v) => v !== t) : l.concat(t)).join(","); touch(); renderEditor();
   }));
   wireGen();
+  wireMove();
+  wireDropdowns(ed);
 }
 let listTimer = 0;
 function renderListLater() { clearTimeout(listTimer); listTimer = setTimeout(renderList, 300); }
@@ -636,6 +771,29 @@ function closePicker() { $("picker").classList.remove("open"); S.pick = null; }
 function renderPicker() {
   if (!S.pick) return;
   const q = $("psearch").value.trim().toLowerCase();
+  // A place for "move and wait" (c = "place", i = the column), or the scenario's cell (c = "cell").
+  if (S.pick.c === "place" || S.pick.c === "cell") {
+    $("pload").style.display = "none";
+    let h = "";
+    if (S.places === undefined) {
+      h = '<div class="grp">場所の一覧を読み込み中…</div>';
+      if (!S.placesAsked) { S.placesAsked = true; send("dse_places", ""); }
+    } else if (S.places === null) {
+      h = '<div class="grp" style="color:var(--danger)">場所の一覧は DLL（SkyrimNet_DialogueScenarioEditor.dll）が必要です。</div>';
+    } else {
+      const all = S.places.filter((p) => !q || p.name.toLowerCase().includes(q) || p.editorID.toLowerCase().includes(q));
+      h += '<div class="grp">室内の場所（' + all.length + "）</div>";
+      for (const p of all.slice(0, 400)) {
+        h += '<div class="npc" data-spec="' + esc(p.spec) + '" data-name="' + esc(p.name) + '"><span>' + esc(p.name) + '</span><span class="pl">' + esc(p.editorID) + "</span></div>";
+      }
+      if (all.length > 400) h += '<div class="grp" style="color:var(--muted)">ほか ' + (all.length - 400) + " か所。名前で絞り込んでください</div>";
+    }
+    $("pstat").textContent = "";
+    $("plist").innerHTML = h;
+    $("plist").querySelectorAll(".npc").forEach((r) => (r.onclick = () => choose(r.dataset.spec, r.dataset.name || "")));
+    return;
+  }
+  $("pload").style.display = S.npcsLoaded ? "none" : "";
   const hit = (n) => !q || n.name.toLowerCase().includes(q) || n.plugin.toLowerCase().includes(q);
   let h = "";
   // The scenario writer is an NPC (their profile sets the style).
@@ -661,6 +819,8 @@ function npcRow(n) {
 }
 function choose(spec, name) {
   const d = S.draft, { c, i } = S.pick;
+  if (c === "place") { d.cols[i].move.place = { spec, label: name }; touch(); closePicker(); renderEditor(); return; }
+  if (c === "cell") { d.cell = { spec, label: name }; touch(); closePicker(); renderEditor(); return; }
   if (c === "writer") { d.gen.writer = { spec, label: name }; touch(); closePicker(); renderEditor(); return; }
   if (c === "people") {
     if (d.gen.people.some((a) => a.spec === spec)) { genStatus("その人はもう参加者にいます。", "err"); closePicker(); return; }
@@ -700,7 +860,14 @@ function save() {
     const col = d.cols[c];
     // A column with nobody in it is not used (and not saved), even if lines are left over
     // from participants that were removed.
-    if (!col.actors.length || col.auto) continue;
+    if (!col.actors.length) continue;
+    if (col.end === 2) {
+      const m = col.move;
+      if (!m.place) { msg((c + 1) + " 列目の行き先を選んでください。", "err"); return false; }
+      if (!m.who.some((i) => i < col.actors.length && !isPlayer(col.actors[i].spec))) { msg((c + 1) + " 列目で移動する人を選んでください。", "err"); return false; }
+      if (!m.until && !(Number(m.days) > 0)) { msg((c + 1) + " 列目の待機の終わり（シナリオか日数）を決めてください。", "err"); return false; }
+    }
+    if (col.auto) continue;
     if (col.lines.some((l) => (l.text.trim() !== "" || l.auto) && (l.who < 0 || l.who >= col.actors.length))) {
       msg((c + 1) + " 列目に、話す人が選ばれていないセリフがあります。", "err"); return false;
     }

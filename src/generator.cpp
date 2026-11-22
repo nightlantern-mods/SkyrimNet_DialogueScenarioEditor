@@ -43,6 +43,7 @@ namespace
         Person              writer;
         std::vector<Person> people;
         int                 columns = 1;
+        bool                limited = false;  // narration only: the page plays the lines as auto lines
         std::string         theme;
         std::string         language;
         json                tags = json::array();       // [{tag, meaning}]
@@ -342,7 +343,7 @@ namespace
         const auto  narrator = Str(a_answer, "narrator");
         json        lines = json::array();
         json        shown = json::array();
-        if (a_answer.contains("lines") && a_answer["lines"].is_array()) {
+        if (!a_job->limited && a_answer.contains("lines") && a_answer["lines"].is_array()) {
             for (const auto& line : a_answer["lines"]) {
                 if (!line.is_object() || lines.size() >= kMaxLines) {
                     continue;
@@ -421,6 +422,7 @@ namespace
             { "ostim", plan["ostim"] },
             { "tags", plan["tags"] },
             { "written", a_job->written },
+            { "lines_wanted", !a_job->limited },
             { "relations", a_job->relations },
             { "language", a_job->language },
         };
@@ -560,6 +562,7 @@ namespace Generator
         }
         job->writer = writer.front();
         job->columns = std::clamp(request.value("columns", 1), 1, kMaxColumns);
+        job->limited = request.value("limited", false);
         job->theme = request.value("theme", std::string());
         job->language = request.value("language", std::string("English"));
         if (request.contains("tags") && request["tags"].is_array()) {
@@ -578,8 +581,8 @@ namespace Generator
                 }
             }
         }
-        logger::info("Generate: writer {} ({:08X}), {} people, {} columns, {} relation lines", job->writer.name, job->writer.ref,
-            job->people.size(), job->columns, job->relations.size());
+        logger::info("Generate: writer {} ({:08X}), {} people, {} columns, {} relation lines{}", job->writer.name, job->writer.ref,
+            job->people.size(), job->columns, job->relations.size(), job->limited ? ", narration only" : "");
         Progress(1, job->columns + 1, "plan");
         json context = {
             { "writer", { { "form_id", job->writer.ref }, { "name", job->writer.name }, { "is_player", job->writer.player } } },

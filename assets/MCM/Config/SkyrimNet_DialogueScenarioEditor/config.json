@@ -16,6 +16,19 @@
 			"valueOptions": {
 				"sourceType": "ModSettingInt"
 			}
+		},
+		{
+			"type": "header",
+			"text": "$DSE_HeaderScenario"
+		},
+		{
+			"id": "iTriggerKey:General",
+			"type": "keymap",
+			"text": "$DSE_TriggerKey",
+			"help": "$DSE_TriggerKeyHelp",
+			"valueOptions": {
+				"sourceType": "ModSettingInt"
+			}
 		}
 	]
 }

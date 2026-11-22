@@ -15,12 +15,18 @@ TEXTS = {
         '$DSE_HeaderPage': 'Settings page',
         '$DSE_PageKey': 'Key that opens the settings page',
         '$DSE_PageKeyHelp': 'Opens the page where you make and change scenarios. No key is set at first: pick one that no other mod uses.',
+        '$DSE_HeaderScenario': 'Scenarios',
+        '$DSE_TriggerKey': 'Key that starts a hotkey scenario',
+        '$DSE_TriggerKeyHelp': 'Starts a scenario whose start is set to Hotkey on the settings page, if its conditions are met where you are. No key is set at first: pick one that no other mod uses.',
     },
     'ja': {
         '$DSE_ModName': 'SkyrimNet Dialogue Scenario Editor',
         '$DSE_HeaderPage': '設定画面',
         '$DSE_PageKey': '設定画面を開くキー',
         '$DSE_PageKeyHelp': 'シナリオを作る・直す画面を開くキーです。最初は割り当てていません。ほかの MOD と重ならないキーを選んでください。',
+        '$DSE_HeaderScenario': 'シナリオ',
+        '$DSE_TriggerKey': 'ホットキーのシナリオを始めるキー',
+        '$DSE_TriggerKeyHelp': '設定画面で発火方法を「ホットキー」にしたシナリオを、今いる場所で条件がそろっていれば始めます。最初は割り当てていません。ほかの MOD と重ならないキーを選んでください。',
     },
 }
 

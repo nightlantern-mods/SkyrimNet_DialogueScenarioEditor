@@ -1,6 +1,7 @@
 Scriptname SkyrimNet_DialogueScenarioEditorMain extends Quest
 {Reads event setups from JSON files in Data/SKSE/Plugins/StorageUtilData/SkyrimNet_DialogueScenarioEditor/
-and runs the first one whose participants are all near the player.
+and runs the first one whose participants are all near the player (automatic scenarios on a timer,
+hotkey scenarios when the player presses the scenario hotkey).
 
 A setup has up to ten columns, run left to right. Each column holds up to three participants,
 an optional narration, up to ten lines (each with its speaker, in any order, the same speaker as
@@ -8,16 +9,24 @@ often as wanted; reworded by SkyrimNet in the speaker's own voice) and an option
 that starts after the lines. A character may appear in several columns, but joins OStim only once
 per event; columns without OStim are just talk.
 
-Keys: enabled, onlytargets, repeat, intervaldays, location (0 any, 1 indoors, 2 outdoors);
+Keys: enabled, trigger (0 automatic, 1 the scenario hotkey), onlytargets, repeat, intervaldays,
+location (0 any, 1 indoors, 2 outdoors), cell / cellname (only in that cell; empty = anywhere);
 per column cN_actors, cN_lines, cN_speakers (intList: participant index per line; without it,
 line i is spoken by participant i), cN_autos (intList: 1 = that line is made up when spoken),
 cN_auto (1 = every line of the column is), cN_autolen (0/1/2 = 3/6/10 lines), cN_narrator,
-cN_ostim, cN_tags.
+cN_end (what ends the column: 0 nothing, 1 OStim scene, 2 move and wait; older files: cN_ostim),
+cN_tags (OStim), cN_movewho (intList of participants), cN_moveplace / cN_moveplacename (a place
+from the DLL's list), cN_moveuntil (a scenario name), cN_movedays; requires (a scenario that must
+have happened first).
 
 The JSON files are only read, never written. Fired state lives in the save (StorageUtil).}
 
 string Property EventFolder = "SkyrimNet_DialogueScenarioEditor" AutoReadOnly
 string Property CommonFile = "SkyrimNet_DialogueScenarioEditor_Common" AutoReadOnly
+; Scenarios the player deleted on the page (list "names", file names without .json). A deleted file
+; is only emptied, so a reinstall or update of the mod brings a shipped example back: this list keeps
+; it deleted. Written only by the page's Delete and Save (the UI script).
+string Property DeletedFile = "SkyrimNet_DialogueScenarioEditor_Deleted" AutoReadOnly
 int Property MaxColumns = 10 AutoReadOnly
 int Property MaxPerColumn = 3 AutoReadOnly
 int Property MaxLines = 10 AutoReadOnly
@@ -34,6 +43,11 @@ string Property SoloActions = "femalemasturbation,malemasturbation,vaginaltoying
 
 bool running = false
 float runStart = 0.0
+bool dllLog = false        ; the DLL has Log: the log goes to SkyrimNet_DialogueScenarioEditor.log
+string lastGlobalWhy = ""  ; why no scenario could start (player in combat etc.), logged on change
+string why = ""            ; why IsReady / TryStart said no (logged per scenario on change)
+float runReal = 0.0        ; real time the run started (seconds), for the timings in the log
+float watchStart = 0.0     ; real time the current speech wait started
 Keyword npcKeyword
 int loadCount = 0 ; bumped on every load
 int runLoad = 0   ; loadCount when the current run started
@@ -54,12 +68,18 @@ string Property HeldList = "SkyrimNet_DialogueScenarioEditor:held" AutoReadOnly 
 
 ; Called on every game load (mod event registrations do not survive a load).
 Function Setup()
+	dllLog = SkyrimNet_DialogueScenarioEditorNative.Version() >= 2
 	npcKeyword = Keyword.GetKeyword("ActorTypeNPC")
 	RegisterSpeechEvents()
 	loadCount += 1
+	lastGlobalWhy = ""
+	StorageUtil.ClearStringValuePrefix("DSE:why:")
+	LogSetupState()
 	; A save made mid-talk keeps the "don't move" flag on whoever was held: give it back.
 	holding = false
 	FreeHeld()
+	; Move-and-wait trips: the linked reference is set again.
+	RestoreParked()
 EndFunction
 
 ; A save made in the middle of an event brings the half-done run back with it. Its speech state
@@ -81,20 +101,32 @@ float Function Check()
 	If npcKeyword == None
 		Setup()
 	EndIf
+	CheckParked()
 
 	Actor player = Game.GetPlayer()
-	If Utility.IsInMenuMode() || player.IsInCombat() || OActor.IsInOStim(player)
+	If Utility.IsInMenuMode()
+		Return CheckInterval ; not logged: every open menu would show up
+	EndIf
+	If player.IsInCombat()
+		GlobalWhy("the player is in combat")
+		Return CheckInterval
+	EndIf
+	If OActor.IsInOStim(player)
+		GlobalWhy("the player is in an OStim scene")
 		Return CheckInterval
 	EndIf
 	Cell here = player.GetParentCell()
 	If here == None
+		GlobalWhy("the player has no cell")
 		Return CheckInterval
 	EndIf
 
 	string[] files = JsonUtil.JsonInFolder(EventFolder)
 	If files.Length == 0
+		GlobalWhy("no scenario files in StorageUtilData/" + EventFolder)
 		Return CheckInterval
 	EndIf
+	GlobalWhy("")
 
 	bool interior = here.IsInterior()
 	float range = ExteriorRange
@@ -106,32 +138,222 @@ float Function Check()
 	int i = 0
 	While i < files.Length
 		string file = EventFolder + "/" + files[i]
-		If IsReady(file, here)
-			If TryStart(file, nearby, here, interior)
-				Return CheckInterval
-			EndIf
+		If IsDeleted(files[i])
+			; deleted on the page: never logged again after the first time
+			Because(file, "deleted on the page")
+		ElseIf JsonUtil.GetIntValue(file, "trigger", 0) == 1
+			Because(file, "starts only with the hotkey")
+		ElseIf !IsReady(file, here)
+			Because(file, why)
+		ElseIf TryStart(file, nearby, here, interior)
+			Return CheckInterval
+		Else
+			Because(file, why)
 		EndIf
 		i += 1
 	EndWhile
 	Return CheckInterval
 EndFunction
 
+; A scenario was deleted, or a new one saved (perhaps under the name of a deleted one): its run
+; record in this save (last run, done, the cell it ran in) belongs to the old one and is dropped.
+Function ForgetRuns(string name)
+	string id = StateKey(EventFolder + "/" + name + ".json")
+	bool had = StorageUtil.GetFloatValue(self, id + ":last", -1.0) >= 0.0
+	StorageUtil.UnsetFloatValue(self, id + ":last")
+	StorageUtil.UnsetFloatValue(self, id + ":done")
+	StorageUtil.UnsetFormValue(self, id + ":cell")
+	StorageUtil.UnsetStringValue(None, "DSE:why:" + EventFolder + "/" + name + ".json")
+	Log("run record of " + name + " cleared (had one: " + had + ")")
+EndFunction
+
+; The scenario hotkey (MCM, handled by the UI script): starts the first scenario set to start with
+; the hotkey ("trigger" 1) whose conditions are met here. Every reason it gives is logged, and the
+; player is told when none could start.
+Function StartByHotkey()
+	Log("scenario hotkey pressed")
+	If running
+		Notify("a scenario is already running")
+		Return
+	EndIf
+	If npcKeyword == None
+		Setup()
+	EndIf
+	Actor player = Game.GetPlayer()
+	If player.IsInCombat() || OActor.IsInOStim(player)
+		Notify("no scenario can start during combat or an OStim scene")
+		Return
+	EndIf
+	Cell here = player.GetParentCell()
+	If here == None
+		Return
+	EndIf
+	string[] files = JsonUtil.JsonInFolder(EventFolder)
+	bool interior = here.IsInterior()
+	float range = ExteriorRange
+	If interior
+		range = InteriorRange
+	EndIf
+	Actor[] nearby = OActorUtil.GetActorsInRangeV2(player, range, true, true)
+	int found = 0
+	int i = 0
+	While i < files.Length
+		string file = EventFolder + "/" + files[i]
+		If !IsDeleted(files[i]) && JsonUtil.GetIntValue(file, "trigger", 0) == 1
+			found += 1
+			If !IsReady(file, here)
+				Log("hotkey: " + ScenarioName(file) + " cannot start: " + why)
+			ElseIf TryStart(file, nearby, here, interior)
+				Return
+			Else
+				Log("hotkey: " + ScenarioName(file) + " cannot start: " + why)
+			EndIf
+		EndIf
+		i += 1
+	EndWhile
+	If found == 0
+		Notify("no scenario is set to start with the hotkey")
+	Else
+		Notify("no hotkey scenario can start here (the log says why)")
+	EndIf
+EndFunction
+
+; Why a scenario does not start, logged only when it changes (the check runs every few seconds).
+; Cleared on every load (Setup), so each session's log says it once.
+Function Because(string file, string reason)
+	string k = "DSE:why:" + file
+	If reason == "" || reason == StorageUtil.GetStringValue(None, k, "")
+		Return
+	EndIf
+	StorageUtil.SetStringValue(None, k, reason)
+	Log("not starting " + ScenarioName(file) + ": " + reason)
+EndFunction
+
+Function GlobalWhy(string reason)
+	If reason == lastGlobalWhy
+		Return
+	EndIf
+	lastGlobalWhy = reason
+	If reason != ""
+		Log("no scenario can start: " + reason)
+	Else
+		Log("checking scenarios again")
+	EndIf
+EndFunction
+
+; On every load: the mod's state, SkyrimNet's settings that matter here, and every scenario.
+Function LogSetupState()
+	Log("---- load " + loadCount + " ----")
+	Log("DLL log: " + dllLog + ", DLL version " + SkyrimNet_DialogueScenarioEditorNative.Version() + ", SkyrimNet " + SkyrimNetApi.GetBuildVersion() + " (" + SkyrimNetApi.GetBuildType() + ")")
+	Log("SkyrimNet: tts engine " + SkyrimNetApi.GetConfigString("game", "tts.engine", "?") + ", player voice " + SkyrimNetApi.GetConfigString("game", "player.voiceId", "?") + ", player voice input " + SkyrimNetApi.GetConfigBool("game", "player.voiceInput", false) + ", continuous mode " + SkyrimNetApi.IsContinuousModeEnabled())
+	Log("running " + running + ", parked " + StorageUtil.FormListCount(self, ParkedList) + ", held " + StorageUtil.FormListCount(self, HeldList))
+	string[] files = JsonUtil.JsonInFolder(EventFolder)
+	Log(files.Length + " scenario file(s)")
+	int i = 0
+	While i < files.Length
+		string file = EventFolder + "/" + files[i]
+		string id = StateKey(file)
+		Log("  " + ScenarioName(file) + ": enabled " + JsonUtil.GetIntValue(file, "enabled", 0) + ", deleted " + IsDeleted(files[i]) + ", trigger " + JsonUtil.GetIntValue(file, "trigger", 0) + " (0 auto, 1 hotkey), location " + JsonUtil.GetIntValue(file, "location", 0) + ", cell '" + JsonUtil.GetStringValue(file, "cellname", "") + "' " + JsonUtil.GetStringValue(file, "cell", "") + ", only participants " + JsonUtil.GetIntValue(file, "onlytargets", 0) + ", repeat " + JsonUtil.GetIntValue(file, "repeat", 0) + " every " + JsonUtil.GetFloatValue(file, "intervaldays", 1.0) + " days, requires '" + JsonUtil.GetStringValue(file, "requires", "") + "', columns " + ColumnSummary(file) + ", last run " + StorageUtil.GetFloatValue(self, id + ":last", -1.0) + ", done " + StorageUtil.GetFloatValue(self, id + ":done", -1.0))
+		i += 1
+	EndWhile
+EndFunction
+
+; "Lydia+player(2 lines, end 1) | Hod(auto 1, end 0)" for the log.
+string Function ColumnSummary(string file)
+	string s = ""
+	int c = 0
+	While c < MaxColumns
+		string col = "c" + (c + 1) + "_"
+		int n = JsonUtil.StringListCount(file, col + "actors")
+		If n > 0
+			string who = ""
+			int k = 0
+			While k < n
+				If k > 0
+					who += "+"
+				EndIf
+				who += JsonUtil.StringListGet(file, col + "actors", k)
+				k += 1
+			EndWhile
+			string lines = JsonUtil.StringListCount(file, col + "lines") + " lines"
+			If JsonUtil.GetIntValue(file, col + "auto", 0) != 0
+				lines = "auto " + JsonUtil.GetIntValue(file, col + "autolen", 0)
+			EndIf
+			If s != ""
+				s += " | "
+			EndIf
+			s += who + "(" + lines + ", end " + JsonUtil.GetIntValue(file, col + "end", JsonUtil.GetIntValue(file, col + "ostim", -1)) + ")"
+		EndIf
+		c += 1
+	EndWhile
+	If s == ""
+		Return "(none)"
+	EndIf
+	Return s
+EndFunction
+
+; True when the player deleted this scenario on the page (a name from JsonInFolder, with or without .json).
+bool Function IsDeleted(string name)
+	int n = StringUtil.GetLength(name)
+	If n > 5 && StringUtil.Substring(name, n - 5) == ".json"
+		name = StringUtil.Substring(name, 0, n - 5)
+	EndIf
+	Return JsonUtil.StringListHas(DeletedFile, "names", name)
+EndFunction
+
 ; Enabled, not used up, past its interval, and not blocked in the cell it last fired in.
 bool Function IsReady(string file, Cell here)
+	why = ""
 	If JsonUtil.GetIntValue(file, "enabled", 0) == 0
+		why = "switched off"
 		Return false
 	EndIf
 	int where = JsonUtil.GetIntValue(file, "location", 0)
 	If (where == 1 && !here.IsInterior()) || (where == 2 && here.IsInterior())
+		If where == 1
+			why = "set to indoors only, and the player is outdoors"
+		Else
+			why = "set to outdoors only, and the player is indoors"
+		EndIf
 		Return false
+	EndIf
+	; A chosen cell ("cell": spec "0xLOCAL|plugin"): only there.
+	string cellSpec = JsonUtil.GetStringValue(file, "cell", "")
+	If cellSpec != ""
+		int bar = StringUtil.Find(cellSpec, "|")
+		Cell wanted = None
+		If bar > 0
+			wanted = Game.GetFormFromFile(ParseHex(StringUtil.Substring(cellSpec, 0, bar)), StringUtil.Substring(cellSpec, bar + 1)) as Cell
+		EndIf
+		If wanted == None
+			why = "the chosen cell " + JsonUtil.GetStringValue(file, "cellname", cellSpec) + " (" + cellSpec + ") is not in the load order"
+			Return false
+		EndIf
+		If wanted != here
+			why = "set to the cell " + JsonUtil.GetStringValue(file, "cellname", cellSpec) + ", and the player is in " + here.GetName() + " (" + here.GetFormID() + ")"
+			Return false
+		EndIf
 	EndIf
 	string id = StateKey(file)
 
+	; Another scenario that must have happened first ("requires": its name).
+	string needed = JsonUtil.GetStringValue(file, "requires", "")
+	If needed != "" && StorageUtil.GetFloatValue(self, StateKey(EventFolder + "/" + needed + ".json") + ":done", -1.0) < 0.0
+		why = "needs " + needed + " to have finished first"
+		Return false
+	EndIf
+
+	; The "once per visit to a cell" block keeps an automatic scenario from firing again and again
+	; while the player stays; a hotkey scenario starts only when asked, so it does not have it.
 	Form blockedCell = StorageUtil.GetFormValue(self, id + ":cell")
+	If blockedCell != None && JsonUtil.GetIntValue(file, "trigger", 0) == 1
+		blockedCell = None
+	EndIf
 	If blockedCell != None
 		If blockedCell != here
 			StorageUtil.UnsetFormValue(self, id + ":cell")
 		Else
+			why = "already ran in this cell (runs again here only after leaving it)"
 			Return false
 		EndIf
 	EndIf
@@ -141,10 +363,15 @@ bool Function IsReady(string file, Cell here)
 		Return true
 	EndIf
 	If JsonUtil.GetIntValue(file, "repeat", 0) == 0
+		why = "already ran once (repeat is off)"
 		Return false
 	EndIf
 	float interval = JsonUtil.GetFloatValue(file, "intervaldays", 1.0)
-	Return Utility.GetCurrentGameTime() - last >= interval
+	If Utility.GetCurrentGameTime() - last < interval
+		why = "repeat interval not over (" + interval + " days)"
+		Return false
+	EndIf
+	Return true
 EndFunction
 
 ; --------------------------------------------------------------------------------------------
@@ -161,7 +388,8 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 		string listKey = "c" + (c + 1) + "_actors"
 		int n = JsonUtil.StringListCount(file, listKey)
 		If n > MaxPerColumn
-			Warn(file, "column " + (c + 1) + " has more than " + MaxPerColumn + " participants")
+			why = "column " + (c + 1) + " has more than " + MaxPerColumn + " participants"
+			Warn(file, why)
 			Return false
 		EndIf
 		int colStart = c * MaxPerColumn
@@ -174,7 +402,8 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 				int s = colStart
 				While s < colStart + k
 					If slots[s] == a
-						Warn(file, "column " + (c + 1) + " lists " + a.GetDisplayName() + " twice")
+						why = "column " + (c + 1) + " lists " + a.GetDisplayName() + " twice"
+						Warn(file, why)
 						Return false
 					EndIf
 					s += 1
@@ -183,13 +412,20 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 				a = Resolve(spec, nearby, here, interior, slots)
 			EndIf
 			If a == None
-				Return false ; someone is not here (normal, no message)
-			EndIf
-			If a.IsChild()
-				Warn(file, "children cannot take part: " + a.GetDisplayName())
+				why = "column " + (c + 1) + ": " + WhyMissing(spec, here, interior, slots) ; someone is not here (normal, no message)
 				Return false
 			EndIf
-			If a.IsInCombat() || OActor.IsInOStim(a)
+			If a.IsChild()
+				why = "children cannot take part: " + a.GetDisplayName()
+				Warn(file, why)
+				Return false
+			EndIf
+			If a.IsInCombat()
+				why = a.GetDisplayName() + " is in combat"
+				Return false
+			EndIf
+			If OActor.IsInOStim(a)
+				why = a.GetDisplayName() + " is in an OStim scene"
 				Return false
 			EndIf
 			slots[colStart + k] = a
@@ -200,22 +436,24 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 	EndWhile
 
 	If JsonUtil.StringListCount(file, "c1_actors") == 0
-		Warn(file, "column 1 has no participants")
+		why = "column 1 has no participants"
+		Warn(file, why)
 		Return false
 	EndIf
 
-	; Who else is around.
-	bool onlyTargets = JsonUtil.GetIntValue(file, "onlytargets", 0) != 0
-	int i = 0
-	While i < nearby.Length
-		Actor other = nearby[i]
-		If Counts(other, here, interior) && slots.Find(other) < 0
-			If onlyTargets || other.IsChild()
+	; Who else is around: only matters with "only the people in it" (children nearby no longer
+	; block a start, the user's choice 2026-11-22; children still cannot take part).
+	If JsonUtil.GetIntValue(file, "onlytargets", 0) != 0
+		int i = 0
+		While i < nearby.Length
+			Actor other = nearby[i]
+			If Counts(other, here, interior) && slots.Find(other) < 0
+				why = "set to only the participants, and " + other.GetDisplayName() + " is around (" + (other.GetDistance(player) as int) + " units away)"
 				Return false
 			EndIf
-		EndIf
-		i += 1
-	EndWhile
+			i += 1
+		EndWhile
+	EndIf
 
 	; Fire: remember it in the save before anything can fail.
 	string id = StateKey(file)
@@ -224,14 +462,42 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 	running = true
 	runStart = Utility.GetCurrentGameTime()
 	runLoad = loadCount
-	Log("start " + file)
+	runReal = Utility.GetCurrentRealTime()
+	Log("==== start " + ScenarioName(file) + " in " + here.GetName() + " (" + LocationWord(interior) + ") ====")
+	Log("file: " + MiscUtil.ReadFromFile("Data/SKSE/Plugins/StorageUtilData/" + file))
+	Log("SkyrimNet now: speech queue " + SkyrimNetApi.GetSpeechQueueSize() + ", ms since audio ended " + SkyrimNetApi.GetTimeSinceLastAudioEnded() + ", continuous mode " + SkyrimNetApi.IsContinuousModeEnabled())
+	int q = 0
+	While q < slots.Length
+		If slots[q] != None
+			Log("  slot c" + (q / MaxPerColumn + 1) + "." + (q % MaxPerColumn + 1) + " '" + specs[q] + "' = " + Who(slots[q]))
+		EndIf
+		q += 1
+	EndWhile
+	; Anyone on a move-and-wait trip takes part without it for now.
+	int s = 0
+	While s < slots.Length
+		If slots[s] != None && IsParked(slots[s])
+			SuspendPark(slots[s])
+		EndIf
+		s += 1
+	EndWhile
 	RunSetup(file, slots)
 	running = false
 	If Interrupted()
-		Log("stopped " + file + " (a save made during the event was loaded)")
+		Log("stopped " + ScenarioName(file) + " (a save made during the event was loaded)")
 	Else
-		Log("done " + file)
+		Log("==== done " + ScenarioName(file) + " after " + Elapsed(runReal) + " ====")
+		StorageUtil.SetFloatValue(self, id + ":done", Utility.GetCurrentGameTime())
+		ReleaseWaitingFor(ScenarioName(file))
 	EndIf
+	; Whoever is still to wait somewhere (sent off by this scenario, or waiting for another) goes on.
+	s = 0
+	While s < slots.Length
+		If slots[s] != None && IsParked(slots[s])
+			ApplyPark(slots[s])
+		EndIf
+		s += 1
+	EndWhile
 	Return true
 EndFunction
 
@@ -247,6 +513,69 @@ Actor Function Reuse(string spec, Actor[] slots, string[] specs, int colStart)
 		j += 1
 	EndWhile
 	Return None
+EndFunction
+
+; For the log: why Resolve found nobody for this entry.
+string Function WhyMissing(string spec, Cell here, bool interior, Actor[] taken)
+	string near = "within " + (ExteriorRange as int) + " units"
+	If interior
+		near = "in this cell"
+	EndIf
+	If IsPlayerWord(spec)
+		Return "'" + spec + "' is the player, who is already taken in this column"
+	EndIf
+	int bar = StringUtil.Find(spec, "|")
+	If bar > 0
+		Form f = Game.GetFormFromFile(ParseHex(StringUtil.Substring(spec, 0, bar)), StringUtil.Substring(spec, bar + 1))
+		If f == None
+			Return "'" + spec + "' is not in the load order (plugin missing?)"
+		EndIf
+		Actor a = f as Actor
+		If a != None
+			If a.IsDead()
+				Return a.GetDisplayName() + " is dead"
+			ElseIf a.IsDisabled()
+				Return a.GetDisplayName() + " is disabled"
+			ElseIf taken.Find(a) >= 0
+				Return a.GetDisplayName() + " is already taken in this column"
+			ElseIf a.GetParentCell() == None
+				Return a.GetDisplayName() + " is not loaded (far away)"
+			EndIf
+			Return a.GetDisplayName() + " is not " + near + " (in " + a.GetParentCell().GetName() + ", " + (a.GetDistance(Game.GetPlayer()) as int) + " units away)"
+		EndIf
+		If f as ActorBase
+			Return "nobody who is " + f.GetName() + " (" + spec + ") is " + near
+		EndIf
+		Return "'" + spec + "' is not a person"
+	EndIf
+	Return "nobody named '" + spec + "' is " + near
+EndFunction
+
+; "Lydia (00A2C94E, 123 units from the player, in Breezehome)" for the log.
+string Function Who(Actor a)
+	If a == None
+		Return "nobody"
+	EndIf
+	If a == Game.GetPlayer()
+		Return a.GetDisplayName() + " (player)"
+	EndIf
+	string cellName = "?"
+	If a.GetParentCell() != None
+		cellName = a.GetParentCell().GetName()
+	EndIf
+	Return a.GetDisplayName() + " (" + a.GetFormID() + ", " + (a.GetDistance(Game.GetPlayer()) as int) + " units from the player, in " + cellName + ")"
+EndFunction
+
+string Function LocationWord(bool interior)
+	If interior
+		Return "interior"
+	EndIf
+	Return "exterior"
+EndFunction
+
+; "12.5 s" since a real time.
+string Function Elapsed(float since)
+	Return (((Utility.GetCurrentRealTime() - since) * 10.0) as int) / 10.0 + " s"
 EndFunction
 
 ; A player word (see IsPlayerWord), "0x1A69A|Skyrim.esm" (a reference), or a display name.
@@ -331,12 +660,25 @@ Function RunColumn(string file, int c, Actor[] cast)
 	Actor player = Game.GetPlayer()
 	string col = "c" + (c + 1) + "_"
 
+	string castNames = ""
+	int q = 0
+	While q < cast.Length
+		If q > 0
+			castNames += ", "
+		EndIf
+		castNames += cast[q].GetDisplayName()
+		q += 1
+	EndWhile
+	Log("-- column " + (c + 1) + " (" + castNames + ") at " + Elapsed(runReal))
 	string narration = JsonUtil.GetStringValue(file, col + "narrator", "")
 	If narration != ""
-		SkyrimNetApi.RegisterPersistentEvent(FillNames(narration), cast[0])
+		int sent = SkyrimNetApi.RegisterPersistentEvent(FillNames(narration), cast[0])
+		Log("narration (not spoken, background for the NPCs) -> " + sent + ": " + FillNames(narration))
 	EndIf
 
+	float gatherStart = Utility.GetCurrentRealTime()
 	Gather(cast)
+	Log("gathered in " + Elapsed(gatherStart))
 
 	; From the second column on, earlier columns' scene talk must not hold this column's lines
 	; back: drop what is queued (the line being spoken still finishes). Chosen by the user.
@@ -353,7 +695,9 @@ Function RunColumn(string file, int c, Actor[] cast)
 
 	If c > 0 && lines > 0
 		SkyrimNetApi.PurgeDialogue(true)
+		Log("purged queued dialogue from earlier columns")
 	EndIf
+	Log(lines + " line(s), auto column " + autoColumn)
 
 	; Lines in their own order, each with its speaker (a participant index). Old files have no
 	; speaker list: line i is then spoken by participant i. An auto line (cN_autos) has no text of
@@ -381,12 +725,21 @@ Function RunColumn(string file, int c, Actor[] cast)
 		If (line != "" || madeUp) && who >= 0 && who < cast.Length
 			Actor speaker = cast[who]
 			Actor listener = PickListener(cast, speaker, lastSpeaker)
+			string kind = "fixed"
+			If madeUp
+				kind = "auto"
+			EndIf
+			Log("line " + (k + 1) + "/" + lines + " at " + Elapsed(runReal) + ": " + speaker.GetDisplayName() + " -> " + Who(listener) + " (" + kind + "): " + FillNames(line))
+			float lineStart = Utility.GetCurrentRealTime()
 			If madeUp
 				SpeakFreely(speaker, listener, context)
 			Else
 				Speak(speaker, listener, FillNames(line))
 			EndIf
+			Log("line " + (k + 1) + " finished after " + Elapsed(lineStart))
 			lastSpeaker = speaker
+		Else
+			Log("line " + (k + 1) + " skipped (empty, or speaker " + who + " not in a cast of " + cast.Length + ")")
 		EndIf
 		k += 1
 	EndWhile
@@ -394,9 +747,180 @@ Function RunColumn(string file, int c, Actor[] cast)
 	; Let them go before OStim places them (or back to their day once only talking).
 	Release(cast)
 
-	If JsonUtil.GetIntValue(file, col + "ostim", 1) != 0 && !Interrupted()
-		StartScene(cast, JsonUtil.GetStringValue(file, col + "tags", ""))
+	; What ends the column (cN_end): 0 nothing, 1 an OStim scene, 2 move and wait. Older files
+	; have only cN_ostim (1 = scene, 0 = nothing).
+	int ending = JsonUtil.GetIntValue(file, col + "end", -1)
+	If ending < 0
+		ending = JsonUtil.GetIntValue(file, col + "ostim", 1)
 	EndIf
+	If Interrupted()
+		Return
+	EndIf
+	Log("column " + (c + 1) + " ends with " + ending + " (0 nothing, 1 OStim, 2 move and wait) at " + Elapsed(runReal))
+	If ending == 1
+		StartScene(cast, JsonUtil.GetStringValue(file, col + "tags", ""))
+	ElseIf ending == 2
+		MoveAway(file, col, cast)
+	EndIf
+EndFunction
+
+; --------------------------------------------------------------------------------------------
+; Move and wait: chosen people of the column walk to a place and wait there, until a named
+; scenario has happened or some days have passed (whichever comes first).
+; They walk with a vanilla package (travel to the linked reference, then hold position within
+; 512), the linked reference being the inside door of the place (from the DLL). Whoever has not
+; arrived an in-game hour later is moved there while out of the player's sight.
+; --------------------------------------------------------------------------------------------
+
+string Property ParkedList = "SkyrimNet_DialogueScenarioEditor:parked" AutoReadOnly
+
+; defaultHoldPositionLinkedRef512WithTravel (Skyrim.esm)
+Package Function TravelHoldPackage()
+	Return Game.GetFormFromFile(0x101C01, "Skyrim.esm") as Package
+EndFunction
+
+Function MoveAway(string file, string col, Actor[] cast)
+	If SkyrimNet_DialogueScenarioEditorNative.Version() == 0
+		Warn(file, "move and wait needs SkyrimNet_DialogueScenarioEditor.dll")
+		Return
+	EndIf
+	ObjectReference anchor = SkyrimNet_DialogueScenarioEditorNative.PlaceAnchor(JsonUtil.GetStringValue(file, col + "moveplace", ""))
+	If anchor == None
+		Warn(file, "the place to move to was not found: " + JsonUtil.GetStringValue(file, col + "moveplacename", ""))
+		Return
+	EndIf
+	string untilName = JsonUtil.GetStringValue(file, col + "moveuntil", "")
+	float days = JsonUtil.GetFloatValue(file, col + "movedays", 3.0)
+	Actor player = Game.GetPlayer()
+	int n = JsonUtil.IntListCount(file, col + "movewho")
+	int i = 0
+	While i < n
+		int who = JsonUtil.IntListGet(file, col + "movewho", i)
+		If who >= 0 && who < cast.Length && cast[who] != player && cast[who] != None
+			Park(cast[who], anchor, untilName, days)
+		EndIf
+		i += 1
+	EndWhile
+EndFunction
+
+Function Park(Actor a, ObjectReference anchor, string untilName, float days)
+	StorageUtil.SetFormValue(a, "DSE:parkAnchor", anchor)
+	StorageUtil.SetStringValue(a, "DSE:parkUntil", untilName)
+	float deadline = -1.0
+	If days > 0.0
+		deadline = Utility.GetCurrentGameTime() + days
+	EndIf
+	StorageUtil.SetFloatValue(a, "DSE:parkDeadline", deadline)
+	StorageUtil.SetFloatValue(a, "DSE:parkSince", Utility.GetCurrentGameTime())
+	StorageUtil.FormListAdd(self, ParkedList, a, false)
+	ApplyPark(a)
+	Log(a.GetDisplayName() + " goes to " + anchor.GetParentCell().GetName() + " and waits (until " + untilName + ", " + days + " days)")
+EndFunction
+
+; (Again) sends a parked person on their way: after a load, or after a scenario they were in.
+Function ApplyPark(Actor a)
+	ObjectReference anchor = StorageUtil.GetFormValue(a, "DSE:parkAnchor") as ObjectReference
+	Package travel = TravelHoldPackage()
+	If anchor == None || travel == None
+		Return
+	EndIf
+	PO3_SKSEFunctions.SetLinkedRef(a, anchor)
+	ActorUtil.AddPackageOverride(a, travel, 100, 1)
+	a.EvaluatePackage()
+EndFunction
+
+; Takes the trip off for now (a scenario with them is starting), keeping the record.
+Function SuspendPark(Actor a)
+	Package travel = TravelHoldPackage()
+	If travel != None
+		ActorUtil.RemovePackageOverride(a, travel)
+	EndIf
+	PO3_SKSEFunctions.SetLinkedRef(a, None)
+	a.EvaluatePackage()
+EndFunction
+
+; Back to their own life.
+Function Unpark(Actor a)
+	SuspendPark(a)
+	StorageUtil.FormListRemove(self, ParkedList, a, true)
+	StorageUtil.UnsetFormValue(a, "DSE:parkAnchor")
+	StorageUtil.UnsetStringValue(a, "DSE:parkUntil")
+	StorageUtil.UnsetFloatValue(a, "DSE:parkDeadline")
+	StorageUtil.UnsetFloatValue(a, "DSE:parkSince")
+	Log(a.GetDisplayName() + " stops waiting")
+EndFunction
+
+bool Function IsParked(Actor a)
+	Return StorageUtil.FormListHas(self, ParkedList, a)
+EndFunction
+
+; Every check: ends waits that ran out, and moves whoever has been on the way too long (out of
+; the player's sight).
+Function CheckParked()
+	int i = StorageUtil.FormListCount(self, ParkedList) - 1
+	If i < 0
+		Return
+	EndIf
+	Actor player = Game.GetPlayer()
+	float now = Utility.GetCurrentGameTime()
+	While i >= 0
+		Actor a = StorageUtil.FormListGet(self, ParkedList, i) as Actor
+		If a == None || a.IsDead()
+			StorageUtil.FormListRemoveAt(self, ParkedList, i)
+		Else
+			float deadline = StorageUtil.GetFloatValue(a, "DSE:parkDeadline", -1.0)
+			ObjectReference anchor = StorageUtil.GetFormValue(a, "DSE:parkAnchor") as ObjectReference
+			If (deadline > 0.0 && now >= deadline) || anchor == None
+				Unpark(a)
+			ElseIf a.GetParentCell() != anchor.GetParentCell() && now - StorageUtil.GetFloatValue(a, "DSE:parkSince", now) > 1.0 / 24.0
+				If !OActor.IsInOStim(a) && !a.IsInCombat() && (!a.Is3DLoaded() || !player.HasLOS(a))
+					Log("moving " + a.GetDisplayName() + " to " + anchor.GetParentCell().GetName() + " (still on the way)")
+					a.MoveTo(anchor)
+					StorageUtil.SetFloatValue(a, "DSE:parkSince", now)
+				EndIf
+			EndIf
+		EndIf
+		i -= 1
+	EndWhile
+EndFunction
+
+; A scenario has finished: whoever was waiting for it goes back to their life.
+Function ReleaseWaitingFor(string scenarioName)
+	int i = StorageUtil.FormListCount(self, ParkedList) - 1
+	While i >= 0
+		Actor a = StorageUtil.FormListGet(self, ParkedList, i) as Actor
+		If a != None && StorageUtil.GetStringValue(a, "DSE:parkUntil", "") == scenarioName
+			Unpark(a)
+		EndIf
+		i -= 1
+	EndWhile
+EndFunction
+
+; Re-applies every trip after a load (the linked reference is set again).
+Function RestoreParked()
+	int i = StorageUtil.FormListCount(self, ParkedList) - 1
+	While i >= 0
+		Actor a = StorageUtil.FormListGet(self, ParkedList, i) as Actor
+		If a != None
+			ApplyPark(a)
+		EndIf
+		i -= 1
+	EndWhile
+EndFunction
+
+; The file's scenario name: "SkyrimNet_DialogueScenarioEditor/event1.json" -> "event1".
+string Function ScenarioName(string file)
+	string s = file
+	int slash = StringUtil.Find(s, "/")
+	While slash >= 0
+		s = StringUtil.Substring(s, slash + 1)
+		slash = StringUtil.Find(s, "/")
+	EndWhile
+	int dot = StringUtil.Find(s, ".json")
+	If dot > 0
+		s = StringUtil.Substring(s, 0, dot)
+	EndIf
+	Return s
 EndFunction
 
 ; Brings everyone to the player (if taking part) or to the first participant, all at once:
@@ -427,13 +951,18 @@ Function Gather(Actor[] cast)
 	bool moved = false
 	int k = 0
 	int spot = 0
+	Log("gathering around " + Who(anchor))
 	While k < cast.Length
 		Actor a = cast[k]
+		If a != anchor
+			Log("  " + Who(a) + ", " + (a.GetDistance(anchor) as int) + " units from " + anchor.GetDisplayName() + ", in OStim " + OActor.IsInOStim(a))
+		EndIf
 		; Someone still in an earlier column's scene stays put (they talk from the scene).
 		If a != anchor && a != player && !OActor.IsInOStim(a)
 			sides[k] = -60.0 + 120.0 * spot ; left, right, then further right
 			spot += 1
 			If a.GetDistance(anchor) > 1500.0
+				Log("moving " + a.GetDisplayName() + " next to " + anchor.GetDisplayName() + " (too far to walk)")
 				a.MoveTo(anchor, sides[k], 110.0, 0.0, false)
 				moved = true
 			EndIf
@@ -618,7 +1147,8 @@ Function Speak(Actor speaker, Actor listener, string line)
 	If speaker == player
 		WaitForSilence(20.0)
 		BeginWatch(player)
-		SkyrimNetApi.TransformDialogue(line)
+		int sent = SkyrimNetApi.TransformDialogue(line)
+		Log("TransformDialogue (player line) -> " + sent + " (0 = accepted)")
 		WaitForSpeech(PlayerSpeechTimeout)
 		Return
 	EndIf
@@ -636,13 +1166,15 @@ Function Speak(Actor speaker, Actor listener, string line)
 	direction = ReplaceAll(direction, "{speaker}", speaker.GetDisplayName())
 	direction = ReplaceAll(direction, "{line}", line)
 	BeginWatch(speaker)
-	SkyrimNetApi.DirectNarration(direction, speaker, listener)
+	int sent = SkyrimNetApi.DirectNarration(direction, speaker, listener)
+	Log("DirectNarration -> " + sent + " (0 = accepted): " + direction)
 	If !WaitForSpeech(NpcSpeechTimeout) && !Interrupted()
 		; Written but not voiced (SkyrimNet thought the speaker was out of earshot): say it again.
-		Log(speaker.GetDisplayName() + "'s line was not voiced; asking again")
+		Log(speaker.GetDisplayName() + "'s line was not voiced; asking again (" + Who(speaker) + ")")
 		Utility.Wait(SettleAfterMove)
 		BeginWatch(speaker)
-		SkyrimNetApi.DirectNarration(direction, speaker, listener)
+		sent = SkyrimNetApi.DirectNarration(direction, speaker, listener)
+		Log("DirectNarration (again) -> " + sent)
 		WaitForSpeech(NpcSpeechTimeout)
 	EndIf
 EndFunction
@@ -706,7 +1238,8 @@ Function SpeakFreely(Actor speaker, Actor listener, string context)
 	If speaker == player
 		WaitForSilence(20.0)
 		BeginWatch(player)
-		SkyrimNetApi.TriggerPlayerDialogue()
+		int sentP = SkyrimNetApi.TriggerPlayerDialogue()
+		Log("TriggerPlayerDialogue (player auto line) -> " + sentP + " (0 = accepted)")
 		WaitForSpeech(PlayerSpeechTimeout)
 		Return
 	EndIf
@@ -720,12 +1253,14 @@ Function SpeakFreely(Actor speaker, Actor listener, string context)
 	direction = ReplaceAll(direction, "{speaker}", speaker.GetDisplayName())
 	direction = ReplaceAll(direction, "{context}", context)
 	BeginWatch(speaker)
-	SkyrimNetApi.DirectNarration(direction, speaker, listener)
+	int sent = SkyrimNetApi.DirectNarration(direction, speaker, listener)
+	Log("DirectNarration (auto) -> " + sent + " (0 = accepted): " + direction)
 	If !WaitForSpeech(NpcSpeechTimeout) && !Interrupted()
-		Log(speaker.GetDisplayName() + "'s auto line was not voiced; asking again")
+		Log(speaker.GetDisplayName() + "'s auto line was not voiced; asking again (" + Who(speaker) + ")")
 		Utility.Wait(SettleAfterMove)
 		BeginWatch(speaker)
-		SkyrimNetApi.DirectNarration(direction, speaker, listener)
+		sent = SkyrimNetApi.DirectNarration(direction, speaker, listener)
+		Log("DirectNarration (auto, again) -> " + sent)
 		WaitForSpeech(NpcSpeechTimeout)
 	EndIf
 EndFunction
@@ -752,24 +1287,48 @@ Function BeginWatch(Actor speaker)
 	piecesStarted = 0
 	piecesEnded = 0
 	replyWritten = false
+	watchStart = Utility.GetCurrentRealTime()
+EndFunction
+
+; While a scenario runs, every speech event is logged, whoever sent it: a line that never counts
+; as heard shows up here as events from someone else (or with no sender).
+Function LogSpeechEvent(string what, string strArg, float numArg, Form sender)
+	If !running
+		Return
+	EndIf
+	string from = "none"
+	If sender != None
+		from = sender.GetName()
+		If sender as Actor
+			from = (sender as Actor).GetDisplayName()
+		EndIf
+	EndIf
+	string mine = ""
+	If watchSpeaker != None && sender == watchSpeaker
+		mine = " [watched]"
+	EndIf
+	Log("  " + what + " from " + from + mine + " +" + Elapsed(watchStart) + " num " + numArg + ": " + strArg)
 EndFunction
 
 Event OnSkyrimNetSpeechStarted(string eventName, string strArg, float numArg, Form sender)
 	If watchSpeaker != None && sender == watchSpeaker
 		piecesStarted += 1
 	EndIf
+	LogSpeechEvent("SpeechStarted", strArg, numArg, sender)
 EndEvent
 
 Event OnSkyrimNetSpeechComplete(string eventName, string strArg, float numArg, Form sender)
 	If watchSpeaker != None && sender == watchSpeaker
 		replyWritten = true
 	EndIf
+	LogSpeechEvent("SpeechComplete", strArg, numArg, sender)
 EndEvent
 
 Event OnSkyrimNetAudioEnded(string eventName, string strArg, float numArg, Form sender)
 	If watchSpeaker != None && sender == watchSpeaker
 		piecesEnded += 1
 	EndIf
+	LogSpeechEvent("AudioEnded", strArg, numArg, sender)
 EndEvent
 
 ; Done when the whole reply is written and every piece of it has played. If the events never
@@ -786,6 +1345,7 @@ bool Function WaitForSpeech(float timeout)
 		EndIf
 		Hold()
 		If replyWritten && piecesStarted > 0 && piecesEnded >= piecesStarted
+			Log("speech done after " + Elapsed(watchStart) + " (written, " + piecesEnded + "/" + piecesStarted + " pieces played)")
 			watchSpeaker = None
 			Utility.Wait(0.5)
 			Return true
@@ -793,6 +1353,7 @@ bool Function WaitForSpeech(float timeout)
 		; Every piece is announced before the reply counts as written, so written with no piece
 		; (after a moment) means SkyrimNet dropped the voice.
 		If replyWritten && piecesStarted == 0 && waited >= 3.0
+			Log("written but not voiced after " + Elapsed(watchStart) + " (no SpeechStarted from the speaker)")
 			watchSpeaker = None
 			Return false
 		EndIf
@@ -800,12 +1361,13 @@ bool Function WaitForSpeech(float timeout)
 		; played and a short quiet follows. Also the no-events fallback.
 		If !replyWritten && piecesEnded > 0 && piecesEnded >= piecesStarted
 			If SkyrimNetApi.GetTimeSinceLastAudioEnded() >= 1500 && SkyrimNetApi.GetSpeechQueueSize() == 0
+				Log("speech done after " + Elapsed(watchStart) + " (" + piecesEnded + "/" + piecesStarted + " pieces played, then quiet)")
 				watchSpeaker = None
 				Return true
 			EndIf
 		EndIf
 	EndWhile
-	Log("speech wait timed out after " + timeout + " s (pieces " + piecesEnded + "/" + piecesStarted + ", written " + replyWritten + ")")
+	Log("speech wait timed out after " + timeout + " s (pieces ended " + piecesEnded + " / started " + piecesStarted + ", written " + replyWritten + ", speech queue " + SkyrimNetApi.GetSpeechQueueSize() + ", ms since audio ended " + SkyrimNetApi.GetTimeSinceLastAudioEnded() + ")")
 	watchSpeaker = None
 	Return true
 EndFunction
@@ -816,13 +1378,16 @@ Function WaitForSilence(float timeout)
 	While waited < timeout
 		int since = SkyrimNetApi.GetTimeSinceLastAudioEnded()
 		If (since == 0 || since >= QuietMs) && SkyrimNetApi.GetSpeechQueueSize() == 0
+			If waited > 0.0
+				Log("waited " + waited + " s for silence")
+			EndIf
 			Return
 		EndIf
 		Utility.Wait(0.5)
 		waited += 0.5
 		Hold()
 	EndWhile
-	Log("silence wait timed out after " + timeout + " s")
+	Log("silence wait timed out after " + timeout + " s (speech queue " + SkyrimNetApi.GetSpeechQueueSize() + ", ms since audio ended " + SkyrimNetApi.GetTimeSinceLastAudioEnded() + ")")
 EndFunction
 
 ; Furniture (beds etc.) follows the player's OStim settings.
@@ -852,6 +1417,7 @@ Function StartScene(Actor[] cast, string tags)
 		Return
 	EndIf
 
+	Log("OStim: " + sorted.Length + " actor(s), tags '" + tags + "', scene " + sceneId)
 	int builder = OThreadBuilder.Create(sorted)
 	If builder < 0
 		Notify("OStim refused these actors")
@@ -866,6 +1432,7 @@ Function StartScene(Actor[] cast, string tags)
 		Utility.Wait(0.5)
 		waited += 0.5
 	EndWhile
+	Log("OStim thread " + thread + " running " + OThread.IsRunning(thread) + " after " + waited + " s")
 	Utility.Wait(1.0)
 EndFunction
 
@@ -991,7 +1558,15 @@ string Function StateKey(string file)
 	Return "SkyrimNet_DialogueScenarioEditor:" + file
 EndFunction
 
+; The DLL's log (SKSE\SkyrimNet_DialogueScenarioEditor.log, no INI setting needed), and the Papyrus log.
 Function Log(string msg)
+	LogAt(msg, 0)
+EndFunction
+
+Function LogAt(string msg, int level)
+	If dllLog
+		SkyrimNet_DialogueScenarioEditorNative.Log(msg, level)
+	EndIf
 	Debug.Trace("[SkyrimNet_DialogueScenarioEditor] " + msg)
 EndFunction
 
@@ -1002,11 +1577,11 @@ Function Warn(string file, string msg)
 		Return
 	EndIf
 	StorageUtil.StringListAdd(self, "SkyrimNet_DialogueScenarioEditor:warned", text)
-	Log(text)
+	LogAt(text, 1)
 	Debug.Notification("ScenarioEditor: " + text)
 EndFunction
 
 Function Notify(string msg)
-	Log(msg)
+	LogAt(msg, 1)
 	Debug.Notification("ScenarioEditor: " + msg)
 EndFunction

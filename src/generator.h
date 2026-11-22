@@ -15,6 +15,6 @@ namespace Generator
 
     // a_request (from the page): {"writer": {"spec", "name"}, "people": [{"spec", "name"}],
     // "columns": n, "theme": text, "language": text, "tags": [{"tag", "meaning"}],
-    // "solo_tags": [tag]}. False when it cannot start (the reason is sent as a DSE_Gen error).
+    // "solo_tags": [tag], "limited": bool (narration only, no lines: the page makes them auto lines)}. False when it cannot start (the reason is sent as a DSE_Gen error).
     bool Start(const std::string& a_request);
 }

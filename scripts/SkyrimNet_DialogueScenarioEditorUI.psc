@@ -13,9 +13,11 @@ string Property ModId = "SkyrimNet_DialogueScenarioEditor" AutoReadOnly
 string Property ViewName = "main" AutoReadOnly
 string Property SetupFolder = "SkyrimNet_DialogueScenarioEditor" AutoReadOnly
 string Property SetupDisk = "Data/SKSE/Plugins/StorageUtilData/SkyrimNet_DialogueScenarioEditor/" AutoReadOnly
+string Property DeletedFile = "SkyrimNet_DialogueScenarioEditor_Deleted" AutoReadOnly ; same as the main script's
 int Property ChunkChars = 3000 AutoReadOnly
 
 int boundKey = 0
+int triggerKey = 0 ; the scenario hotkey (starts hotkey scenarios)
 bool sendingNpcs = false
 bool usePrisma = false
 int pageView = 0 ; the Magelight view last shown (generation answers come later)
@@ -40,8 +42,12 @@ Function Setup()
 	RegisterForModEvent("DSE_Prisma_dse_save", "OnPageSave")
 	RegisterForModEvent("DSE_Prisma_dse_delete", "OnPageDelete")
 	RegisterForModEvent("DSE_Prisma_dse_npcs", "OnPageNpcs")
+	RegisterForModEvent("Magelight_JS_dse_places", "OnPagePlaces")
+	RegisterForModEvent("DSE_Prisma_dse_places", "OnPagePlaces")
 	RegisterForModEvent("Magelight_JS_dse_generate", "OnPageGenerate")
 	RegisterForModEvent("DSE_Prisma_dse_generate", "OnPageGenerate")
+	RegisterForModEvent("Magelight_JS_dse_here", "OnPageHere")
+	RegisterForModEvent("DSE_Prisma_dse_here", "OnPageHere")
 	RegisterForModEvent("DSE_Gen", "OnGen")
 	sendingNpcs = false
 	usePrisma = UsePrisma()
@@ -74,16 +80,27 @@ Function BindHotkey()
 	If boundKey > 0
 		RegisterForKey(boundKey)
 	EndIf
+	triggerKey = GetModSettingInt("iTriggerKey:General")
+	If triggerKey > 0 && triggerKey != boundKey
+		RegisterForKey(triggerKey)
+	EndIf
 EndFunction
 
 Event OnSettingChange(String a_ID)
-	If a_ID == "iHotkey:General"
+	If a_ID == "iHotkey:General" || a_ID == "iTriggerKey:General"
 		BindHotkey()
 	EndIf
 EndEvent
 
 Event OnKeyDown(int keyCode)
-	If boundKey <= 0 || keyCode != boundKey || Utility.IsInMenuMode()
+	If Utility.IsInMenuMode()
+		Return
+	EndIf
+	If triggerKey > 0 && keyCode == triggerKey && keyCode != boundKey
+		((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).StartByHotkey() ; both scripts are on the same quest
+		Return
+	EndIf
+	If boundKey <= 0 || keyCode != boundKey
 		Return
 	EndIf
 	usePrisma = UsePrisma()
@@ -105,14 +122,17 @@ EndEvent
 Function OpenPrisma()
 	If !SkyrimNet_DialogueScenarioEditorNative.Open()
 		Debug.Notification("ScenarioEditor: could not open the page (Prisma UI is busy)")
+		Log("could not open the page: Prisma UI is busy")
 		Return
 	EndIf
+	Log("page opened (Prisma UI)")
 	SendAll(0)
 EndFunction
 
 Function Open()
 	If Magelight.GetVersion() == 0 || !Magelight.IsReady()
 		Debug.Notification("ScenarioEditor: Magelight UI or Prisma UI is required")
+		Log("could not open the page: Magelight version " + Magelight.GetVersion() + ", host " + SkyrimNet_DialogueScenarioEditorNative.Host())
 		Return
 	EndIf
 	Magelight.RegisterMod(ModId, "SkyrimNet Dialogue Scenario Editor")
@@ -124,8 +144,10 @@ Function Open()
 	EndIf
 	If view == 0
 		Debug.Notification("ScenarioEditor: could not open the page (" + Magelight.GetLastError(ModId) + ")")
+		Log("could not open the page: " + Magelight.GetLastError(ModId))
 		Return
 	EndIf
+	Log("page opened (Magelight UI " + Magelight.GetVersion() + ", new view " + fresh + ")")
 	Magelight.ShowView(view, true)
 	Magelight.RequestUIMode(view, true)
 	If !fresh
@@ -151,7 +173,40 @@ Function RegisterListeners(int view)
 	Magelight.RegisterListener(view, "dse_delete")
 	Magelight.RegisterListener(view, "dse_npcs")
 	Magelight.RegisterListener(view, "dse_generate")
+	Magelight.RegisterListener(view, "dse_places")
+	Magelight.RegisterListener(view, "dse_here")
 EndFunction
+
+; The places "move and wait" can send people to (from the DLL), for the page's place picker.
+; Without the DLL the page gets null and says so.
+Event OnPagePlaces(string eventName, string strArg, float numArg, Form sender)
+	int view = numArg as int
+	If view != 0
+		pageView = view
+	EndIf
+	If SkyrimNet_DialogueScenarioEditorNative.Version() == 0
+		Js(pageView, "dsePlaces(null)")
+		Return
+	EndIf
+	Js(pageView, "dsePlaces(" + SkyrimNet_DialogueScenarioEditorNative.PlaceList() + ")")
+EndEvent
+
+; The player's cell, for a scenario's cell condition ("this cell" on the page).
+Event OnPageHere(string eventName, string strArg, float numArg, Form sender)
+	int view = numArg as int
+	If view != 0
+		pageView = view
+	EndIf
+	string here = ""
+	If SkyrimNet_DialogueScenarioEditorNative.Version() >= 3
+		here = SkyrimNet_DialogueScenarioEditorNative.HereCell()
+	EndIf
+	If here == ""
+		here = "null"
+	EndIf
+	Log("this cell: " + here)
+	Js(pageView, "dseHere(" + here + ")")
+EndEvent
 
 ; --------------------------------------------------------------------------------------------
 ; Scenario generation (the DLL asks SkyrimNet's AI; this only passes messages along)
@@ -166,6 +221,7 @@ Event OnPageGenerate(string eventName, string strArg, float numArg, Form sender)
 		Js(pageView, "dseGen({\"type\":\"error\",\"code\":\"nodll\"})")
 		Return
 	EndIf
+	Log("generate requested")
 	SkyrimNet_DialogueScenarioEditorNative.Generate(strArg) ; a failure to start arrives as DSE_Gen
 EndEvent
 
@@ -227,7 +283,7 @@ Function SendSetups(int view)
 		EndIf
 		string text = MiscUtil.ReadFromFile(SetupDisk + name)
 		string base = StringUtil.Substring(name, 0, StringUtil.GetLength(name) - 5)
-		If IsSafeName(base) && StringUtil.Find(text, "{") >= 0
+		If IsSafeName(base) && StringUtil.Find(text, "{") >= 0 && !JsonUtil.StringListHas(DeletedFile, "names", base)
 			Js(view, "dseSetup(\"" + base + "\"," + text + ")")
 		EndIf
 		i += 1
@@ -327,12 +383,26 @@ Event OnPageSave(string eventName, string strArg, float numArg, Form sender)
 		Js(view, "dseSaved(\"\",false)")
 		Return
 	EndIf
+	; A new scenario (no file yet, or an emptied / deleted one): any run record under this name is
+	; an old scenario's, and must not keep the new one from starting.
+	bool isNew = StringUtil.Find(MiscUtil.ReadFromFile(SetupDisk + name + ".json"), "{") < 0 || JsonUtil.StringListHas(DeletedFile, "names", name)
 	bool ok = MiscUtil.WriteToFile(SetupDisk + name + ".json", text, false, false)
 	JsonUtil.Unload(SetupFolder + "/" + name, false)
+	If ok && isNew
+		((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).ForgetRuns(name)
+	EndIf
+	Log("saved " + name + " (" + StringUtil.GetLength(text) + " chars, ok " + ok + ")")
+	If ok && JsonUtil.StringListHas(DeletedFile, "names", name)
+		; saved again under a deleted name: it is a scenario again
+		JsonUtil.StringListRemove(DeletedFile, "names", name, true)
+		JsonUtil.Save(DeletedFile, false)
+	EndIf
 	Js(view, "dseSaved(\"" + name + "\"," + (ok as int) + ")")
 EndEvent
 
 ; Payload: "<name>". The file is emptied (PapyrusUtil cannot delete); empty files are ignored.
+; The name also goes into the deleted list, so a shipped example the mod's files bring back on a
+; reinstall or update stays deleted.
 Event OnPageDelete(string eventName, string strArg, float numArg, Form sender)
 	int view = numArg as int
 	If !IsSafeName(strArg)
@@ -340,8 +410,20 @@ Event OnPageDelete(string eventName, string strArg, float numArg, Form sender)
 	EndIf
 	MiscUtil.WriteToFile(SetupDisk + strArg + ".json", "", false, false)
 	JsonUtil.Unload(SetupFolder + "/" + strArg, false)
+	JsonUtil.StringListAdd(DeletedFile, "names", strArg, false)
+	JsonUtil.Save(DeletedFile, false)
+	((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).ForgetRuns(strArg)
+	Log("deleted " + strArg)
 	Js(view, "dseDeleted(\"" + strArg + "\")")
 EndEvent
+
+; The DLL's log (see the main script's Log).
+Function Log(string msg)
+	If SkyrimNet_DialogueScenarioEditorNative.Version() >= 2
+		SkyrimNet_DialogueScenarioEditorNative.Log("page: " + msg, 0)
+	EndIf
+	Debug.Trace("[SkyrimNet_DialogueScenarioEditor] page: " + msg)
+EndFunction
 
 ; --------------------------------------------------------------------------------------------
 ; Helpers
