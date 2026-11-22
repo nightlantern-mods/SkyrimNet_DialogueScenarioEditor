@@ -28,7 +28,7 @@ A Japanese README is in `README_ja.md`.
 
 Optional: [SN Sexual Memories](https://github.com/nightlantern-mods/SN_SexualMemories) (its relationship maps are used by Generate).
 
-Tested with Skyrim SE 1.6.1170, SkyrimNet (Nexus build of 2026-11-16), OStim Standalone 7.5.1, PapyrusUtil 4.6, powerofthree's Papyrus Extender 6.5.2, MCM Helper 1.6.2, SkyUI 6.11 and Magelight UI 16.
+Tested with Skyrim SE 1.6.1170, SkyrimNet (Nexus build of 2026-11-16), OStim Standalone 7.5.1, SexLab P+, PapyrusUtil 4.6, powerofthree's Papyrus Extender 6.5.2, MCM Helper 1.6.2, SkyUI 6.11 and Magelight UI 16.
 
 ## Installing
 

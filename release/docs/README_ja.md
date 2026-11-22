@@ -40,7 +40,7 @@
 
 任意：[SN Sexual Memories](https://github.com/nightlantern-mods/SN_SexualMemories)（全生成でその相関図を使います）
 
-動作確認した環境：Skyrim SE 1.6.1170、SkyrimNet（Nexus 版 2026-11-16）、OStim Standalone 7.5.1、PapyrusUtil 4.6、powerofthree's Papyrus Extender 6.5.2、MCM Helper 1.6.2、SkyUI 6.11、Magelight UI 16
+動作確認した環境：Skyrim SE 1.6.1170、SkyrimNet（Nexus 版 2026-11-16）、OStim Standalone 7.5.1、SexLab P+、PapyrusUtil 4.6、powerofthree's Papyrus Extender 6.5.2、MCM Helper 1.6.2、SkyUI 6.11、Magelight UI 16
 
 ## 導入
 
