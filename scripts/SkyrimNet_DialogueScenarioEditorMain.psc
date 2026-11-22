@@ -14,7 +14,8 @@ location (0 any, 1 indoors, 2 outdoors), cell / cellname (only in that cell; emp
 per column cN_actors, cN_lines, cN_speakers (intList: participant index per line; without it,
 line i is spoken by participant i), cN_autos (intList: 1 = that line is made up when spoken),
 cN_auto (1 = every line of the column is), cN_autolen (0/1/2 = 3/6/10 lines), cN_narrator,
-cN_end (what ends the column: 0 nothing, 1 OStim scene, 2 move and wait; older files: cN_ostim),
+cN_end (what ends the column: 0 nothing, 1 OStim scene, 2 move and wait, 3 a SkyrimNet action:
+cN_action, cN_actmod, cN_actwho, cN_actargs; older files: cN_ostim),
 cN_tags (OStim), cN_movewho (intList of participants), cN_moveplace / cN_moveplacename (a place
 from the DLL's list), cN_moveuntil (a scenario name), cN_movedays; requires (a scenario that must
 have happened first).
@@ -58,6 +59,8 @@ Actor[] holdCast
 Actor holdAnchor
 float[] holdSides
 bool[] holdSettled ; per participant: close enough and standing still
+bool[] holdApproached ; per participant: this mod set their KeepOffsetFromActor
+string Property TouchedList = "SkyrimNet_DialogueScenarioEditor:touched" AutoReadOnly ; changed by an action this run
 bool anchorFaced = false ; an NPC anchor has turned toward the others
 int holdTick = 0
 string Property HeldList = "SkyrimNet_DialogueScenarioEditor:held" AutoReadOnly ; actors with SetDontMove on
@@ -74,6 +77,7 @@ Function Setup()
 	loadCount += 1
 	lastGlobalWhy = ""
 	StorageUtil.ClearStringValuePrefix("DSE:why:")
+	DetectFrameworks()
 	LogSetupState()
 	; A save made mid-talk keeps the "don't move" flag on whoever was held: give it back.
 	holding = false
@@ -111,8 +115,8 @@ float Function Check()
 		GlobalWhy("the player is in combat")
 		Return CheckInterval
 	EndIf
-	If OActor.IsInOStim(player)
-		GlobalWhy("the player is in an OStim scene")
+	If InScene(player)
+		GlobalWhy("the player is in a sex scene")
 		Return CheckInterval
 	EndIf
 	Cell here = player.GetParentCell()
@@ -133,7 +137,7 @@ float Function Check()
 	If interior
 		range = InteriorRange
 	EndIf
-	Actor[] nearby = OActorUtil.GetActorsInRangeV2(player, range, true, true)
+	Actor[] nearby = NearbyActors(player, range)
 
 	int i = 0
 	While i < files.Length
@@ -180,8 +184,8 @@ Function StartByHotkey()
 		Setup()
 	EndIf
 	Actor player = Game.GetPlayer()
-	If player.IsInCombat() || OActor.IsInOStim(player)
-		Notify("no scenario can start during combat or an OStim scene")
+	If player.IsInCombat() || InScene(player)
+		Notify("no scenario can start during combat or a sex scene")
 		Return
 	EndIf
 	Cell here = player.GetParentCell()
@@ -194,7 +198,7 @@ Function StartByHotkey()
 	If interior
 		range = InteriorRange
 	EndIf
-	Actor[] nearby = OActorUtil.GetActorsInRangeV2(player, range, true, true)
+	Actor[] nearby = NearbyActors(player, range)
 	int found = 0
 	int i = 0
 	While i < files.Length
@@ -424,8 +428,8 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 				why = a.GetDisplayName() + " is in combat"
 				Return false
 			EndIf
-			If OActor.IsInOStim(a)
-				why = a.GetDisplayName() + " is in an OStim scene"
+			If InScene(a)
+				why = a.GetDisplayName() + " is in a sex scene"
 				Return false
 			EndIf
 			slots[colStart + k] = a
@@ -463,6 +467,7 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 	runStart = Utility.GetCurrentGameTime()
 	runLoad = loadCount
 	runReal = Utility.GetCurrentRealTime()
+	StorageUtil.FormListClear(self, TouchedList)
 	Log("==== start " + ScenarioName(file) + " in " + here.GetName() + " (" + LocationWord(interior) + ") ====")
 	Log("file: " + MiscUtil.ReadFromFile("Data/SKSE/Plugins/StorageUtilData/" + file))
 	Log("SkyrimNet now: speech queue " + SkyrimNetApi.GetSpeechQueueSize() + ", ms since audio ended " + SkyrimNetApi.GetTimeSinceLastAudioEnded() + ", continuous mode " + SkyrimNetApi.IsContinuousModeEnabled())
@@ -483,6 +488,7 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 	EndWhile
 	RunSetup(file, slots)
 	running = false
+	StorageUtil.FormListClear(self, TouchedList)
 	If Interrupted()
 		Log("stopped " + ScenarioName(file) + " (a save made during the event was loaded)")
 	Else
@@ -756,12 +762,62 @@ Function RunColumn(string file, int c, Actor[] cast)
 	If Interrupted()
 		Return
 	EndIf
-	Log("column " + (c + 1) + " ends with " + ending + " (0 nothing, 1 OStim, 2 move and wait) at " + Elapsed(runReal))
+	Log("column " + (c + 1) + " ends with " + ending + " (0 nothing, 1 OStim, 2 move and wait, 3 action) at " + Elapsed(runReal))
 	If ending == 1
 		StartScene(cast, JsonUtil.GetStringValue(file, col + "tags", ""))
 	ElseIf ending == 2
 		MoveAway(file, col, cast)
+	ElseIf ending == 3
+		RunAction(file, col, cast)
 	EndIf
+EndFunction
+
+; --------------------------------------------------------------------------------------------
+; A SkyrimNet action at the end of a column (cN_end 3): cN_action (its name), cN_actmod (the mod it
+; comes from, for messages), cN_actwho (who does it: a participant of the column), cN_actargs (its
+; parameters as a JSON object; {player} and the like are filled in). The mod that defines it may
+; have been removed since the scenario was saved: then it is skipped and the log says so.
+; --------------------------------------------------------------------------------------------
+
+Function RunAction(string file, string col, Actor[] cast)
+	string name = JsonUtil.GetStringValue(file, col + "action", "")
+	string fromMod = JsonUtil.GetStringValue(file, col + "actmod", "")
+	If name == ""
+		Log("action: none chosen")
+		Return
+	EndIf
+	If !SkyrimNetApi.IsActionRegistered(name)
+		LogAt("action " + name + " (" + fromMod + ") is not registered in SkyrimNet (its mod is not installed or not running): skipped", 1)
+		Return
+	EndIf
+	int who = JsonUtil.GetIntValue(file, col + "actwho", 0)
+	If who < 0 || who >= cast.Length
+		who = 0
+	EndIf
+	string args = FillNames(JsonUtil.GetStringValue(file, col + "actargs", "{}"))
+	If args == ""
+		args = "{}"
+	EndIf
+	int result = SkyrimNetApi.ExecuteAction(name, cast[who], args)
+	Log("action " + name + " (" + fromMod + ") by " + Who(cast[who]) + " with " + args + " -> " + result + " (0 = done)")
+	; Whoever the action is about (the one doing it, and anyone of the column named in it) is left
+	; alone by the later columns of this run: what the action started (a fight, a walk, a pose, a
+	; package of its own) must not be undone by gathering and holding them.
+	Touch(cast[who], "did the action " + name)
+	int t = 0
+	While t < cast.Length
+		If t != who && cast[t] != Game.GetPlayer() && StringUtil.Find(args, cast[t].GetDisplayName()) >= 0
+			Touch(cast[t], "named in the action " + name)
+		EndIf
+		t += 1
+	EndWhile
+	; Give what it starts a moment to begin before the next column.
+	Utility.Wait(2.0)
+	int k = 0
+	While k < cast.Length
+		Log("  after the action: " + cast[k].GetDisplayName() + " in combat " + cast[k].IsInCombat())
+		k += 1
+	EndWhile
 EndFunction
 
 ; --------------------------------------------------------------------------------------------
@@ -814,6 +870,9 @@ Function Park(Actor a, ObjectReference anchor, string untilName, float days)
 	StorageUtil.SetFloatValue(a, "DSE:parkSince", Utility.GetCurrentGameTime())
 	StorageUtil.FormListAdd(self, ParkedList, a, false)
 	ApplyPark(a)
+	If running
+		Touch(a, "sent to wait at " + anchor.GetParentCell().GetName())
+	EndIf
 	Log(a.GetDisplayName() + " goes to " + anchor.GetParentCell().GetName() + " and waits (until " + untilName + ", " + days + " days)")
 EndFunction
 
@@ -873,7 +932,7 @@ Function CheckParked()
 			If (deadline > 0.0 && now >= deadline) || anchor == None
 				Unpark(a)
 			ElseIf a.GetParentCell() != anchor.GetParentCell() && now - StorageUtil.GetFloatValue(a, "DSE:parkSince", now) > 1.0 / 24.0
-				If !OActor.IsInOStim(a) && !a.IsInCombat() && (!a.Is3DLoaded() || !player.HasLOS(a))
+				If !InScene(a) && !a.IsInCombat() && (!a.Is3DLoaded() || !player.HasLOS(a))
 					Log("moving " + a.GetDisplayName() + " to " + anchor.GetParentCell().GetName() + " (still on the way)")
 					a.MoveTo(anchor)
 					StorageUtil.SetFloatValue(a, "DSE:parkSince", now)
@@ -929,9 +988,18 @@ EndFunction
 ; then goes on anyway so a stuck NPC cannot hold the event.
 Function Gather(Actor[] cast)
 	Actor player = Game.GetPlayer()
+	; The player when taking part, else the first participant the mod may hold (see LeftAlone).
 	Actor anchor = cast[0]
 	If cast.Find(player) >= 0
 		anchor = player
+	Else
+		int f = 0
+		While f < cast.Length && LeftAlone(cast[f]) != ""
+			f += 1
+		EndWhile
+		If f < cast.Length
+			anchor = cast[f]
+		EndIf
 	EndIf
 	float[] sides = new float[3]
 	; The cast is held together from here until Release (see Hold). An NPC anchor has no spot of
@@ -941,10 +1009,16 @@ Function Gather(Actor[] cast)
 	holdAnchor = anchor
 	holdSides = sides
 	holdSettled = new bool[3]
+	holdApproached = new bool[3]
 	anchorFaced = false
 	holdTick = 0
-	If anchor != player && !OActor.IsInOStim(anchor)
+	; Someone the mod must leave alone (fighting, in a scene, changed by an action...) gets no
+	; "wait here", anchor or not.
+	string anchorWhy = LeftAlone(anchor)
+	If anchor != player && anchorWhy == ""
 		Pin(anchor, None) ; turned toward the first one to arrive (Hold)
+	ElseIf anchorWhy != ""
+		Log("not holding " + anchor.GetDisplayName() + ": " + anchorWhy)
 	EndIf
 	holding = true
 
@@ -954,11 +1028,12 @@ Function Gather(Actor[] cast)
 	Log("gathering around " + Who(anchor))
 	While k < cast.Length
 		Actor a = cast[k]
+		string alone = LeftAlone(a)
 		If a != anchor
-			Log("  " + Who(a) + ", " + (a.GetDistance(anchor) as int) + " units from " + anchor.GetDisplayName() + ", in OStim " + OActor.IsInOStim(a))
+			Log("  " + Who(a) + ", " + (a.GetDistance(anchor) as int) + " units from " + anchor.GetDisplayName() + LeftAloneNote(alone))
 		EndIf
-		; Someone still in an earlier column's scene stays put (they talk from the scene).
-		If a != anchor && a != player && !OActor.IsInOStim(a)
+		; Someone in a scene, fighting or changed by an action stays where they are (they talk from there).
+		If a != anchor && a != player && alone == ""
 			sides[k] = -60.0 + 120.0 * spot ; left, right, then further right
 			spot += 1
 			If a.GetDistance(anchor) > 1500.0
@@ -983,7 +1058,7 @@ Function Gather(Actor[] cast)
 		k = 0
 		While k < cast.Length
 			Actor late = cast[k]
-			If late != anchor && late != player && !OActor.IsInOStim(late) && late.GetDistance(anchor) > NearDistance
+			If late != anchor && late != player && LeftAlone(late) == "" && late.GetDistance(anchor) > NearDistance
 				Log("moving " + late.GetDisplayName() + " (did not arrive in " + WarpAfter + " s)")
 				late.MoveTo(anchor, sides[k], 110.0, 0.0, false)
 				moved = true
@@ -1016,10 +1091,35 @@ Function Hold()
 	EndIf
 	holdTick = 0
 	Actor player = Game.GetPlayer()
+	; Something that starts while they talk (a fight, a scene, another mod's package hold) is let be:
+	; whoever it takes loses the "wait here" and the spot to keep.
+	If holdAnchor != None && holdAnchor != player && StorageUtil.FormListHas(self, HeldList, holdAnchor)
+		string anchorWhy = LeftAlone(holdAnchor)
+		If anchorWhy != ""
+			Log(holdAnchor.GetDisplayName() + " no longer held: " + anchorWhy)
+			Unpin(holdAnchor)
+			Rekick(holdAnchor)
+		EndIf
+	EndIf
+	FreeFightersFromTalk()
 	int k = 0
 	While k < holdCast.Length
 		Actor a = holdCast[k]
-		If a != None && a != holdAnchor && a != player && !OActor.IsInOStim(a)
+		string alone = ""
+		If a != None && a != holdAnchor && a != player
+			alone = LeftAlone(a)
+		EndIf
+		If alone != ""
+			If StorageUtil.FormListHas(self, HeldList, a)
+				Log(a.GetDisplayName() + " no longer held: " + alone)
+				Unpin(a)
+				Rekick(a)
+			EndIf
+			If holdApproached[k]
+				a.ClearKeepOffsetFromActor() ; only the offset this mod set
+				holdApproached[k] = false
+			EndIf
+		ElseIf a != None && a != holdAnchor && a != player
 			float dist = a.GetDistance(holdAnchor)
 			If dist > 900.0
 				Log("moving " + a.GetDisplayName() + " back (wandered off while talking)")
@@ -1033,6 +1133,7 @@ Function Hold()
 				EndIf
 			ElseIf dist <= NearDistance
 				a.ClearKeepOffsetFromActor()
+				holdApproached[k] = false
 				Pin(a, holdAnchor)
 				holdSettled[k] = true
 				If !anchorFaced && holdAnchor != player
@@ -1045,9 +1146,103 @@ Function Hold()
 	EndWhile
 EndFunction
 
+; Why the mod must not move or hold this actor now ("" when it may): in a sex scene (either
+; framework), fighting (a brawl too), changed by an action or a move-and-wait earlier in this run
+; (Touch), or held by another mod through SkyrimNet's package holds (its own scene). Speaking is
+; not affected: they still say their lines from where they are.
+string Function LeftAlone(Actor a)
+	If a == None || a == Game.GetPlayer()
+		Return ""
+	EndIf
+	If InScene(a)
+		Return "in a sex scene"
+	ElseIf a.IsInCombat()
+		Return "fighting"
+	ElseIf StorageUtil.FormListHas(self, TouchedList, a)
+		Return StorageUtil.GetStringValue(a, "DSE:touched", "changed by an action")
+	ElseIf SkyrimNetApi.IsHoldingPackages(a, "")
+		Return "another mod holds their SkyrimNet packages"
+	EndIf
+	Return ""
+EndFunction
+
+string Function LeftAloneNote(string reason)
+	If reason == ""
+		Return ""
+	EndIf
+	Return ", left alone: " + reason
+EndFunction
+
+; Marks an actor as changed by this run (see LeftAlone) until the run ends.
+Function Touch(Actor a, string reason)
+	If a == None || a == Game.GetPlayer()
+		Return
+	EndIf
+	StorageUtil.FormListAdd(self, TouchedList, a, false)
+	StorageUtil.SetStringValue(a, "DSE:touched", reason)
+	Log(a.GetDisplayName() + " is left alone for the rest of this run: " + reason)
+EndFunction
+
+; A fighter whose fight began while a "stand still" package was on them (this mod's wait, or
+; SkyrimNet's talk package) may stand and take the blows even once it is gone (2026-11-22: Orgnar,
+; StartCombat at 19:09:29.8, holds off at 19:09:30.4). The fight is started again against their
+; current target, as SeverActions itself does for brawls that do not take ("Rekick").
+Function Rekick(Actor a)
+	If a == None || a == Game.GetPlayer() || !a.IsInCombat()
+		Return
+	EndIf
+	Actor target = a.GetCombatTarget()
+	a.EvaluatePackage()
+	; Only a fight between people of the column: a target from outside it (the player, picked by the
+	; AI's own action, 2026-11-22) is not pushed on.
+	If target != None && (holdCast == None || holdCast.Find(target) < 0)
+		Log(a.GetDisplayName() + " fights " + target.GetDisplayName() + ", who is not in this column: not started again")
+		Return
+	EndIf
+	If target != None
+		a.StartCombat(target)
+		Log(a.GetDisplayName() + ": fight started again against " + target.GetDisplayName() + " now that nothing holds them")
+	Else
+		Log(a.GetDisplayName() + ": fighting with no combat target to start again against")
+	EndIf
+EndFunction
+
+; While an NPC speaks, SkyrimNet holds them with its own talk package (TalkToNPC, or TalkToPlayer)
+; until the reply is over, so a participant who fights while still talking stands and takes the
+; blows (a brawl the AI started from the talk, 2026-11-22). Their lines stay: only that package is
+; taken off anyone of the column who is fighting, through SkyrimNet's own UnregisterPackage.
+Function FreeFightersFromTalk()
+	If holdCast == None
+		Return
+	EndIf
+	Actor player = Game.GetPlayer()
+	int k = 0
+	While k < holdCast.Length
+		Actor a = holdCast[k]
+		If a != None && a != player && a.IsInCombat()
+			bool freed = false
+			If SkyrimNetApi.HasPackage(a, "TalkToNPC") == 1
+				SkyrimNetApi.UnregisterPackage(a, "TalkToNPC")
+				Log(a.GetDisplayName() + " is fighting: SkyrimNet's TalkToNPC package taken off so they fight while talking")
+				freed = true
+			EndIf
+			If SkyrimNetApi.HasPackage(a, "TalkToPlayer") == 1
+				SkyrimNetApi.UnregisterPackage(a, "TalkToPlayer")
+				Log(a.GetDisplayName() + " is fighting: SkyrimNet's TalkToPlayer package taken off so they fight while talking")
+				freed = true
+			EndIf
+			If freed
+				Rekick(a)
+			EndIf
+		EndIf
+		k += 1
+	EndWhile
+EndFunction
+
 ; Walk to the spot beside the anchor (a loose spot: within 100 of it counts).
 Function Approach(Actor a, int k)
 	holdSettled[k] = false
+	holdApproached[k] = true
 	a.KeepOffsetFromActor(holdAnchor, holdSides[k], 110.0, 0.0, 0.0, 0.0, 180.0, 200.0, 100.0)
 EndFunction
 
@@ -1103,7 +1298,7 @@ EndFunction
 bool Function AllNear(Actor[] cast, Actor anchor)
 	int k = 0
 	While k < cast.Length
-		If cast[k] != anchor && cast[k] != Game.GetPlayer() && !OActor.IsInOStim(cast[k]) && cast[k].GetDistance(anchor) > NearDistance
+		If cast[k] != anchor && cast[k] != Game.GetPlayer() && LeftAlone(cast[k]) == "" && cast[k].GetDistance(anchor) > NearDistance
 			Return false
 		EndIf
 		k += 1
@@ -1114,10 +1309,12 @@ EndFunction
 Function Release(Actor[] cast)
 	holding = false
 	FreeHeld()
+	; Only the offsets this mod set are cleared: one that an action or another mod set stays.
 	int k = 0
-	While k < cast.Length
-		If cast[k] != Game.GetPlayer() && !OActor.IsInOStim(cast[k])
-			cast[k].ClearKeepOffsetFromActor()
+	While k < holdCast.Length && k < holdApproached.Length
+		If holdApproached[k] && holdCast[k] != None
+			holdCast[k].ClearKeepOffsetFromActor()
+			holdApproached[k] = false
 		EndIf
 		k += 1
 	EndWhile
@@ -1390,66 +1587,157 @@ Function WaitForSilence(float timeout)
 	Log("silence wait timed out after " + timeout + " s (speech queue " + SkyrimNetApi.GetSpeechQueueSize() + ", ms since audio ended " + SkyrimNetApi.GetTimeSinceLastAudioEnded() + ")")
 EndFunction
 
-; Furniture (beds etc.) follows the player's OStim settings.
+; --------------------------------------------------------------------------------------------
+; Sex scenes: OStim Standalone or SexLab (P+ or 1.6x), whichever is installed; with both, the MCM
+; choice (set by the UI script through SetFramework: 0 automatic = OStim, 1 OStim, 2 SexLab). The
+; calls themselves are in SkyrimNet_DialogueScenarioEditorOS / SL / SLP / SL16, which only run when
+; their framework is installed, so this script names no type of either.
+; --------------------------------------------------------------------------------------------
+
+bool hasOStim = false
+Quest slApi = None
+bool slLegacy = false   ; SexLab 1.6x (else P+)
+int frameworkChoice = 0
+
+Function DetectFrameworks()
+	hasOStim = Game.IsPluginInstalled("OStim.esp")
+	slApi = None
+	slLegacy = false
+	int version = 0
+	If Game.IsPluginInstalled("SexLab.esm")
+		slApi = SkyrimNet_DialogueScenarioEditorSL.API()
+		version = SkyrimNet_DialogueScenarioEditorSL.Version()
+		slLegacy = version > 0 && version < 20000
+	EndIf
+	Log("frameworks: OStim " + hasOStim + ", SexLab " + (slApi != None) + " (version " + version + ", 1.6x " + slLegacy + "), MCM choice " + frameworkChoice + " (0 auto, 1 OStim, 2 SexLab); scenes use " + FrameworkName())
+EndFunction
+
+Function SetFramework(int choice)
+	If choice < 0 || choice > 2
+		choice = 0 ; not set yet in the MCM: automatic
+	EndIf
+	frameworkChoice = choice
+	Log("scene framework set to " + choice + " (0 auto, 1 OStim, 2 SexLab): scenes use " + FrameworkName())
+EndFunction
+
+bool Function SceneWithOStim()
+	If !hasOStim
+		Return false
+	EndIf
+	Return frameworkChoice != 2 || slApi == None
+EndFunction
+
+string Function FrameworkName()
+	If SceneWithOStim()
+		Return "OStim"
+	ElseIf slApi == None
+		Return "none"
+	ElseIf slLegacy
+		Return "SexLab 1.6x"
+	EndIf
+	Return "SexLab P+"
+EndFunction
+
+; In a scene of either framework (this mod's or another's).
+bool Function InScene(Actor a)
+	If a == None
+		Return false
+	EndIf
+	If hasOStim && SkyrimNet_DialogueScenarioEditorOS.IsInScene(a)
+		Return true
+	EndIf
+	Return slApi != None && SkyrimNet_DialogueScenarioEditorSL.IsActive(slApi, a)
+EndFunction
+
+bool Function AnyInScene(Actor[] cast)
+	int k = 0
+	While k < cast.Length
+		If InScene(cast[k])
+			Return true
+		EndIf
+		k += 1
+	EndWhile
+	Return false
+EndFunction
+
+; Everyone near center (the player too): the DLL's list of loaded actors, else OStim's search, else
+; PapyrusUtil's scan of the cell.
+Actor[] Function NearbyActors(ObjectReference center, float range)
+	If SkyrimNet_DialogueScenarioEditorNative.Version() >= 5
+		Return SkyrimNet_DialogueScenarioEditorNative.NearbyActors(center, range)
+	ElseIf hasOStim
+		Return SkyrimNet_DialogueScenarioEditorOS.Nearby(center, range)
+	EndIf
+	Return MiscUtil.ScanCellNPCs(center, range, None, false)
+EndFunction
+
+; The column's sex scene with its tags (OStim's; SexLab gets the matching SexLab tags).
 Function StartScene(Actor[] cast, string tags)
 	WaitForSilence(20.0)
 	StopScenesOf(cast)
-	Actor[] sorted = OActorUtil.Sort(cast, OActorUtil.EmptyArray())
-	string sceneId = ""
-	If tags != ""
-		sceneId = OLibrary.GetRandomSceneWithAnySceneTagCSV(sorted, tags)
-		If sceneId == ""
-			sceneId = OLibrary.GetRandomSceneWithAnyActionCSV(sorted, tags)
+	If npcKeyword == None
+		Setup()
+	EndIf
+	If SceneWithOStim()
+		int thread = SkyrimNet_DialogueScenarioEditorOS.StartScene(cast, tags, SoloActions)
+		If thread == -1
+			Notify("no OStim scene fits " + cast.Length + " actors")
+			Return
+		ElseIf thread < 0
+			Notify("OStim refused these actors")
+			Return
 		EndIf
-		If sceneId == ""
-			Log("no scene for tags '" + tags + "' with " + sorted.Length + " actors; using any scene")
-		EndIf
-	EndIf
-	; Alone: most solo scenes are idles and intros, so "any scene" means masturbation here.
-	If sceneId == "" && sorted.Length == 1
-		sceneId = OLibrary.GetRandomSceneWithAnyActionCSV(sorted, SoloActions)
-	EndIf
-	If sceneId == ""
-		sceneId = OLibrary.GetRandomScene(sorted)
-	EndIf
-	If sceneId == ""
-		Notify("no OStim scene fits " + sorted.Length + " actors")
+		; The next column waits until this scene has started.
+		float waited = 0.0
+		While waited < 10.0 && !SkyrimNet_DialogueScenarioEditorOS.IsRunning(thread)
+			Utility.Wait(0.5)
+			waited += 0.5
+		EndWhile
+		Log("OStim: " + cast.Length + " actor(s), tags '" + tags + "', thread " + thread + " running " + SkyrimNet_DialogueScenarioEditorOS.IsRunning(thread) + " after " + waited + " s")
+		Utility.Wait(1.0)
 		Return
 	EndIf
-
-	Log("OStim: " + sorted.Length + " actor(s), tags '" + tags + "', scene " + sceneId)
-	int builder = OThreadBuilder.Create(sorted)
-	If builder < 0
-		Notify("OStim refused these actors")
+	If slApi == None
+		Notify("no sex scene: neither OStim nor SexLab is installed")
 		Return
 	EndIf
-	OThreadBuilder.SetStartingAnimation(builder, sceneId)
-	int thread = OThreadBuilder.Start(builder)
-
-	; The next column waits until this scene has started.
-	float waited = 0.0
-	While waited < 10.0 && !OThread.IsRunning(thread)
+	string[] slTags = SkyrimNet_DialogueScenarioEditorSL.SexLabTags(tags)
+	Log(FrameworkName() + ": " + cast.Length + " actor(s), OStim tags '" + tags + "' -> SexLab tags '" + PapyrusUtil.StringJoin(slTags, ",") + "'")
+	int slThread
+	If slLegacy
+		slThread = SkyrimNet_DialogueScenarioEditorSL16.StartScene(slApi, cast, slTags)
+	Else
+		slThread = SkyrimNet_DialogueScenarioEditorSLP.StartScene(slApi, cast, slTags)
+	EndIf
+	If slThread < 0
+		Notify("SexLab refused these actors")
+		Return
+	EndIf
+	float slWaited = 0.0
+	While slWaited < 10.0 && !AnyInScene(cast)
 		Utility.Wait(0.5)
-		waited += 0.5
+		slWaited += 0.5
 	EndWhile
-	Log("OStim thread " + thread + " running " + OThread.IsRunning(thread) + " after " + waited + " s")
+	Log("SexLab thread " + slThread + " active " + AnyInScene(cast) + " after " + slWaited + " s")
 	Utility.Wait(1.0)
 EndFunction
 
 ; Anyone still in a scene (an earlier column's, or any other) has that scene stopped first, so the
-; same character can join OStim again later in the event (the user's choice). OStim cannot take
-; one actor out of a scene, so everyone else in that scene leaves it too.
+; same character can take part again later in the event (the user's choice). Neither framework can
+; take one actor out of a scene, so everyone else in that scene leaves it too.
 Function StopScenesOf(Actor[] cast)
 	bool stopped = false
 	int k = 0
 	While k < cast.Length
-		If OActor.IsInOStim(cast[k])
-			int thread = OActor.GetThreadID(cast[k])
-			If thread >= 0 && OThread.IsRunning(thread)
-				Log("stopping scene " + thread + " for " + cast[k].GetDisplayName())
-				OThread.Stop(thread)
-				stopped = true
-			EndIf
+		bool one = false
+		If hasOStim && SkyrimNet_DialogueScenarioEditorOS.StopSceneOf(cast[k])
+			one = true
+		ElseIf slApi != None && SkyrimNet_DialogueScenarioEditorSL.StopSceneOf(slApi, cast[k])
+			one = true
+		EndIf
+		If one
+			Log("stopped the scene " + cast[k].GetDisplayName() + " was in")
+			stopped = true
 		EndIf
 		k += 1
 	EndWhile
@@ -1457,22 +1745,11 @@ Function StopScenesOf(Actor[] cast)
 		Return
 	EndIf
 	float waited = 0.0
-	While waited < 10.0 && AnyInOStim(cast)
+	While waited < 10.0 && AnyInScene(cast)
 		Utility.Wait(0.5)
 		waited += 0.5
 	EndWhile
 	Utility.Wait(1.5) ; let them stand up and redress before the next scene
-EndFunction
-
-bool Function AnyInOStim(Actor[] cast)
-	int k = 0
-	While k < cast.Length
-		If OActor.IsInOStim(cast[k])
-			Return true
-		EndIf
-		k += 1
-	EndWhile
-	Return false
 EndFunction
 
 ; --------------------------------------------------------------------------------------------
@@ -1484,7 +1761,7 @@ Actor[] Function ColumnCast(Actor[] slots, int c)
 	While n < MaxPerColumn && slots[c * MaxPerColumn + n] != None
 		n += 1
 	EndWhile
-	Actor[] cast = OActorUtil.CreateArray(n)
+	Actor[] cast = PapyrusUtil.ActorArray(n)
 	int k = 0
 	While k < n
 		cast[k] = slots[c * MaxPerColumn + k]

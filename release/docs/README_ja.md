@@ -1,7 +1,7 @@
-# SkyrimNet Dialogue Scenario Editor 0.2.0（ダイアログシナリオエディタ）
+# SkyrimNet Dialogue Scenario Editor 0.3.0（ダイアログシナリオエディタ）
 
 > [!CAUTION]
-> **成人向けの内容を含みます。** シナリオは性的なシーン（OStim）で終わることがあります。18 歳未満の方は使わないでください。
+> **成人向けの内容を含みます。** シナリオは性的なシーン（OStim または SexLab）で終わることがあります。18 歳未満の方は使わないでください。
 
 近くにいる実際の NPC が演じる、短いシナリオを作れる MOD です。誰が参加するか、どんな状況か、誰が何を言うか、そのあと性的なシーンに進むかを決められます。シナリオ全体を NPC に書かせることもできます。セリフは SkyrimNet の AI が話し手らしい言葉で話すので、同じシナリオがどんなキャラクターにも合います。
 
@@ -13,12 +13,12 @@
   - 参加キャラ 1〜3 人（プレイヤーも可）
   - 状況を示すナレーション
   - 最大 10 個のセリフ（順番も話し手も自由。同じ人が何度話しても構いません）
-  - 列の終わり方：なし（セリフだけ）、OStim シーン（タグを選べます）、**移動して待機**（選んだ人が室内の場所へ歩いて行き、別のシナリオが終わるか何日かたつまでそこで待ちます）
+  - 列の終わり方：なし（セリフだけ）、セックスシーン（タグを選べます。OStim か SexLab P+ / 1.6x。両方あるときは MCM で選びます）、**移動して待機**（選んだ人が室内の場所へ歩いて行き、別のシナリオが終わるか何日かたつまでそこで待ちます）、**SkyrimNet のアクション**（参加者の 1 人が実行します。入っている MOD のアクションだけを選べます。例：SeverActions）
 
   同じ人を複数の列に入れられます。1 人だけの列はオナニーのシーンにできます。
 - **話し手らしい言葉で話す**：セリフはそのまま読み上げられません。SkyrimNet に「話し手は今から、こういう意味のことを言おうとしている」と伝え、AI がそのキャラクターらしい言葉にします。プレイヤーのセリフは、SkyrimNet を通してプレイヤーのキャラクターが話します。
 - **オート**：セリフ 1 つずつ、または列全体（短 3・中 6・長 10 回）を「オート」にできます。オートのセリフは、話す番が来たときに AI が作ります。手がかりは、その列のナレーション、前後の列、それまでの会話です。
-- **全生成**：シナリオライター（NPC）、参加者（NPC とプレイヤーから 2〜10 人）、列の数、必要ならテーマを選びます。ライターがその人らしい作風で全部の列を書きます。各列の参加キャラ、ナレーション、話し手つきのセリフ、OStim がふさわしい列とそのタグです。参考にするのは、参加者の BIO・記憶・最近の出来事・最新の日記と、[SN Sexual Memories](https://github.com/nightlantern-mods/SN_SexualMemories) の相関図（あれば）です。結果は編集画面に入るので、確認・修正してから保存します。**限定生成（セリフはオート）** は、各列の参加キャラ・ナレーション・OStim（タグ）だけを書き、セリフはオート（中）にします（ゲーム内でその場で作られます）。
+- **全生成**：シナリオライター（NPC）、参加者（NPC とプレイヤーから 2〜10 人）、列の数、必要ならテーマを選びます。ライターがその人らしい作風で全部の列を書きます。各列の参加キャラ、ナレーション、話し手つきのセリフ、セックスシーンがふさわしい列とそのタグです。参考にするのは、参加者の BIO・記憶・最近の出来事・最新の日記と、[SN Sexual Memories](https://github.com/nightlantern-mods/SN_SexualMemories) の相関図（あれば）です。結果は編集画面に入るので、確認・修正してから保存します。**限定生成（セリフはオート）** は、各列の参加キャラ・ナレーション・セックスシーン（タグ）だけを書き、セリフはオート（中）にします（ゲーム内でその場で作られます）。
 - **始まる条件**：参加者全員がプレイヤーの近く（同じ室内、または屋外でそばにいる）にいると始まります。次のことを選べます。
   - 自動で始まるか、ホットキー（MCM で設定）を押したときに始まるか
   - ほかの人がいてもよいか、参加者だけのときか
@@ -26,13 +26,13 @@
   - 特定のセルだけにするか（室内の場所の一覧から選ぶか、今いるセル）
   - 1 回だけか、何日かごとに繰り返すか（0 日なら、その場所に入り直すたびに始まります）
   - 先に終わっている必要があるシナリオ（前提）
-- **列の進み方**：参加者がプレイヤーのところへ（プレイヤーが列にいないときは 1 人目のところへ）歩いて集まります。数秒たっても来ない人は移動させます。話しているあいだは近くにとどまります。そのあと列の終わり方（OStim シーン、または移動して待機）に進み、すぐ次の列に進みます。前の列のシーンにまだいる人は、次のシーンの前にそのシーンから抜けます（そのシーンにいた全員のシーンが終わります）。
+- **列の進み方**：参加者がプレイヤーのところへ（プレイヤーが列にいないときは 1 人目のところへ）歩いて集まります。数秒たっても来ない人は移動させます。話しているあいだは近くにとどまります。そのあと列の終わり方（セックスシーン、移動して待機、アクション）に進み、すぐ次の列に進みます。前の列のシーンにまだいる人は、次のシーンの前にそのシーンから抜けます（そのシーンにいた全員のシーンが終わります）。
 
 ## 前提 MOD
 
 - [SKSE64](https://skse.silverlock.org/) と [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444)
 - [SkyrimNet](https://www.nexusmods.com/skyrimspecialedition/mods/198346)
-- [OStim Standalone](https://www.nexusmods.com/skyrimspecialedition/mods/98163)
+- セックスシーン用に [OStim Standalone](https://www.nexusmods.com/skyrimspecialedition/mods/98163) か [SexLab P+](https://www.loverslab.com/files/file/31574-sexlab-p/) / SexLab 1.6x のどちらか（なくても、会話・移動して待機・アクションのシナリオは動きます）
 - [PapyrusUtil SE](https://www.nexusmods.com/skyrimspecialedition/mods/13048)
 - [powerofthree's Papyrus Extender](https://www.nexusmods.com/skyrimspecialedition/mods/22854)
 - [MCM Helper](https://www.nexusmods.com/skyrimspecialedition/mods/53000) と [SkyUI](https://www.nexusmods.com/skyrimspecialedition/mods/12604)
@@ -71,11 +71,12 @@ MOD の動きは `Documents\My Games\Skyrim Special Edition\SKSE\SkyrimNet_Dialo
 
 - 椅子に座っている NPC は、歩いて集まるために立ち上がらないことがあります。数秒たつと移動させます。
 - Prisma UI：対応していますが、まだゲーム内で確認していません。
+- 列の最後に設定したアクションとは別に、SkyrimNet 自身がナレーションやセリフの内容を見てアクション（喧嘩、物を渡す、ついて行く、など）を選ぶことがあります。セリフをオートにすると、この傾向が強くなります。設定した場所で確実にアクションを起こしたいときは、ナレーションとセリフはその直前まで（殴るのではなく言い争いまで）にして、開始は列の最後のアクションにまかせてください。
 
 ## ライセンスと権利表記
 
 - この MOD（スクリプト、プラグイン、設定画面、プロンプト、文言）は © 2026 takafumi、**MIT ライセンス**です（THIRD_PARTY_NOTICES.txt の 1 節）。SkyrimNet 用の 2 つのプロンプト（`dse_scenario_plan`、`dse_scenario_column`）はこの MOD のために書いたものです。SkyrimNet のテンプレート関数とイベント履歴の部品を呼び出しますが、それらは同梱していません。
 - **SKSE/Plugins/SkyrimNet_DialogueScenarioEditor.dll** は CommonLibSSE NG（GPL-3.0-or-later、Modding Exception と GPL-3.0 Linking Exception 付き）を静的にリンクしているため、**GNU General Public License 第 3 版以降**で配布します（COPYING.txt）。DLL の完全なソースとビルド用ファイルは `Source/SKSE/SkyrimNet_DialogueScenarioEditor/` に、Papyrus のソースは `Source/Scripts/` に入っています。
 - DLL には、SkyrimNet のプラグイン API ヘッダ（MIT、© Fateless.Ai）、Prisma UI の API ヘッダ、JSON for Modern C++、spdlog、DirectXMath、DirectX Tool Kit、rapidcsv も含まれます。それぞれのライセンスは **THIRD_PARTY_NOTICES.txt** にあります。
-- SkyrimNet、OStim、PapyrusUtil、powerofthree's Papyrus Extender、MCM Helper、SkyUI、Magelight UI、Prisma UI、SN Sexual Memories は、それぞれの作者による別の MOD で、この MOD には含まれていません。
+- SkyrimNet、OStim、SexLab、PapyrusUtil、powerofthree's Papyrus Extender、MCM Helper、SkyUI、Magelight UI、Prisma UI、SN Sexual Memories は、それぞれの作者による別の MOD で、この MOD には含まれていません。
 - これは非公式のファンメイド MOD です。Bethesda Softworks、ZeniMax Media、Fateless.Ai、上記 MOD の作者が作成・承認・サポートしているものではありません。The Elder Scrolls と Skyrim は ZeniMax Media Inc. の商標です。

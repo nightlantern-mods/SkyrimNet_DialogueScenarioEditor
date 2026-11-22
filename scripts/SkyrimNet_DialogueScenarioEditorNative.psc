@@ -5,7 +5,7 @@ The Prisma UI host of the settings page: the page's calls window.dse_*(text) arr
 "DSE_Prisma_dse_*" (strArg = text). Scenario generation: progress and the result arrive as the mod
 event "DSE_Gen" (strArg = JSON for the page's dseGen).}
 
-; 1 or more when the DLL is loaded, 0 without it (2: Log exists, 3: HereCell exists).
+; 1 or more when the DLL is loaded, 0 without it (2: Log exists, 3: HereCell exists, 4: ActionNames / ActionList exist, 5: NearbyActors exists).
 int Function Version() global native
 
 ; Writes a line to the DLL's log, Documents\My Games\Skyrim Special Edition\SKSE\SkyrimNet_DialogueScenarioEditor.log
@@ -32,6 +32,14 @@ string Function NpcList() global native
 ; Named interior places (each reached by a load door) as a JSON array of [spec, name, editorID],
 ; for the page's place picker ("move and wait" at the end of a column).
 string Function PlaceList() global native
+
+; SkyrimNet actions defined in the installed mods' action files (Version 4). ActionNames: every name
+; found; ActionList: the page's list (JSON) for the names given (the ones SkyrimNet has registered).
+string[] Function ActionNames() global native
+string Function ActionList(string[] registered) global native
+
+; Everyone loaded within range of center (the player too), for finding a scenario's cast (Version 5).
+Actor[] Function NearbyActors(ObjectReference center, float range) global native
 
 ; The player's cell as a JSON array [spec, name, interior] ("" if none), for a scenario's cell condition.
 string Function HereCell() global native

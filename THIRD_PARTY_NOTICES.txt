@@ -18,10 +18,10 @@ How this mod is licensed
   https://www.gnu.org/licenses/gpl-3.0.txt.
 
 - Corresponding Source of the DLL:
-    * this mod's source, version 0.2.0: included in the archive, in
+    * this mod's source, version 0.3.0: included in the archive, in
       Source/SKSE/SkyrimNet_DialogueScenarioEditor/ (src/ and xmake.lua; build with xmake and
       CommonLibSSE NG, see the README there), and at
-      https://github.com/nightlantern-mods/SkyrimNet_DialogueScenarioEditor (tag v0.2.0);
+      https://github.com/nightlantern-mods/SkyrimNet_DialogueScenarioEditor (tag v0.3.0);
     * CommonLibSSE NG 7.5.4, built from source with this mod:
       https://github.com/alandtse/CommonLibSSE-NG/tree/v7.5.4;
     * the other libraries listed below, at the versions given.

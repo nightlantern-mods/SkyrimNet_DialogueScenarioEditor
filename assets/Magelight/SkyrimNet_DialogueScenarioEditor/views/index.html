@@ -291,12 +291,13 @@ function clone(o) { return JSON.parse(JSON.stringify(o)); }
 // -1 when not chosen yet, text, auto: made up in the game }), narration, OStim on/off and tags.
 // auto: every line of the column is made up in the game, AUTOLINES[autolen] of them.
 const AUTOLINES = [3, 6, 10], AUTONAMES = ["短", "中", "長"];
-// What ends a column (end): 0 nothing, 1 an OStim scene (tags), 2 move and wait (move: who =
+// What ends a column (end): 0 nothing, 1 a sex scene (OStim or SexLab; tags in OStim's names), 2 move and wait (move: who =
 // participant indexes, place = {spec, label} from the DLL's list, until = a scenario name or "",
 // days = longest wait). More kinds can be added to ENDS.
-const ENDS = [[0, "なし（セリフだけ）"], [1, "OStim シーン"], [2, "移動して待機"]];
+const ENDS = [[0, "なし（セリフだけ）"], [1, "セックスシーン（OStim / SexLab）"], [2, "移動して待機"], [3, "SkyrimNet のアクション"]];
+function blankAct() { return { name: "", mod: "", who: 0, args: {} }; }
 function blankMove() { return { who: [], place: null, until: "", days: 3 }; }
-function blankCol() { return { actors: [], lines: [], end: 1, tags: "", narrator: "", auto: false, autolen: 1, move: blankMove() }; }
+function blankCol() { return { actors: [], lines: [], end: 1, tags: "", narrator: "", auto: false, autolen: 1, move: blankMove(), act: blankAct() }; }
 // gen: what Generate was (or will be) asked with, kept with the setup so it can be run again.
 function blankGen() { return { theme: "", writer: null, people: [], columns: 3 }; }
 function blankSetup(name) {
@@ -331,6 +332,9 @@ function fromFile(name, o) {
     col.end = I[k + "end"] ?? (I[k + "ostim"] === undefined ? 1 : (I[k + "ostim"] ? 1 : 0));
     col.move = { who: (N[k + "movewho"] || []).slice(), until: T[k + "moveuntil"] || "", days: F[k + "movedays"] ?? 3,
       place: T[k + "moveplace"] ? { spec: T[k + "moveplace"], label: T[k + "moveplacename"] || T[k + "moveplace"] } : null };
+    let args = {};
+    try { args = JSON.parse(T[k + "actargs"] || "{}") || {}; } catch (e) { args = {}; }
+    col.act = { name: T[k + "action"] || "", mod: T[k + "actmod"] || "", who: I[k + "actwho"] ?? 0, args };
     col.tags = T[k + "tags"] || ""; col.narrator = T[k + "narrator"] || "";
     if (col.actors.length) s.shown = c + 1;
   }
@@ -359,6 +363,13 @@ function toFile(s) {
       if (m.place) { o.string[k + "moveplace"] = m.place.spec; o.string[k + "moveplacename"] = m.place.label; }
       o.string[k + "moveuntil"] = m.until;
       o.float[k + "movedays"] = Number(m.days) || 0;
+    }
+    if (col.end === 3) {
+      const a = col.act, args = {};
+      Object.keys(a.args).forEach((n) => { if (String(a.args[n]).trim() !== "") args[n] = String(a.args[n]).trim(); });
+      o.string[k + "action"] = a.name; o.string[k + "actmod"] = a.mod;
+      o.int[k + "actwho"] = a.who < col.actors.length ? a.who : 0;
+      o.string[k + "actargs"] = JSON.stringify(args);
     }
     o.int[k + "auto"] = col.auto ? 1 : 0;
     o.int[k + "autolen"] = col.autolen;
@@ -496,12 +507,14 @@ function renderEditor() {
     h += '<div class="sec"><div class="t">列の最後に</div>' + dropdown("end:" + c, col.end, ENDS, "");
     if (col.end === 1) {
       h += '<div class="hint">前の列のシーン中のキャラは、そのシーンを止めてから新しいシーンを始めます（同じシーンにいた全員のシーンが終わります）。</div>';
-      h += '<div class="t" style="margin-top:6px">OStim タグ（どれかに合うシーンを選びます。なしならおまかせ）</div>';
+      h += '<div class="t" style="margin-top:6px">タグ（どれかに合うシーンを選びます。なしならおまかせ。SexLab では近いタグに読み替えます。使う MOD は MCM で選べます）</div>';
       h += '<div class="tags">' + tagChips(col.tags, c) + "</div>";
       h += '<div class="t" style="margin-top:6px">候補にないタグ（カンマ区切り）</div>';
       h += '<input data-tags="' + c + '" value="' + esc(tagList(col.tags).filter((t) => !TAGS.some((x) => x[0] === t)).join(",")) + '" style="width:100%">';
     } else if (col.end === 2) {
       h += moveForm(d, col, c);
+    } else if (col.end === 3) {
+      h += actionForm(d, col, c);
     } else {
       h += '<div class="hint">セリフだけの列になります。</div>';
     }
@@ -576,6 +589,61 @@ window.dseHere = (here) => {
   d.cell = { spec: here[0], label: here[1] || here[0] };
   touch(); renderEditor(); msg("セルを「" + d.cell.label + "」にしました。");
 };
+// ---------------------------------------------------------------- a SkyrimNet action (a column's end)
+// The actions come from the DLL: those in the installed mods' action files that SkyrimNet has
+// registered, [{n: name, m: mod, d: description, p: [{n, d, o: optional}]}]. undefined: not asked
+// yet; null: no DLL.
+function actionInfo(name) { return Array.isArray(S.actions) ? S.actions.find((a) => a.n === name) : null; }
+function askActions() { if (S.actions === undefined && !S.actionsAsked) { S.actionsAsked = true; send("dse_actions", ""); } }
+function actionForm(d, col, c) {
+  const a = col.act, info = actionInfo(a.name);
+  if (a.name && S.actions === undefined) askActions();
+  let h = '<div class="t" style="margin-top:8px">アクション</div>';
+  h += '<button class="small" data-apick="' + c + '">' + (a.name ? esc(a.name) + "（変える）" : "＋ アクションを選ぶ") + "</button>";
+  if (a.name) {
+    h += ' <span class="hint">' + esc(a.mod) + "</span>";
+    if (info) h += '<div class="hint" style="margin-top:4px">' + esc(info.d) + "</div>";
+    else if (Array.isArray(S.actions)) h += '<div class="hint" style="margin-top:4px;color:var(--danger)">このアクションは今のゲームでは使えません（その MOD が入っていないか、動いていません）。実行のときは飛ばされます。</div>';
+  }
+  h += '<div class="t" style="margin-top:8px">実行する人</div><div class="tags">';
+  col.actors.forEach((x, i) => {
+    h += '<span class="chip ' + (a.who === i ? "on" : "off") + '" data-awho="' + c + "," + i + '">' + esc(label(x)) + "</span>";
+  });
+  h += "</div>";
+  const params = info ? info.p : Object.keys(a.args).map((n) => ({ n, d: "", o: true }));
+  if (params.length) {
+    h += '<div class="t" style="margin-top:8px">引数</div>';
+    const names = col.actors.map((x) => (isPlayer(x.spec) ? "{player}" : x.label));
+    params.forEach((p) => {
+      h += '<div style="margin-top:6px"><b>' + esc(p.n) + "</b>" + (p.o ? ' <span class="hint">（省略可）</span>' : ' <span class="req">必須</span>') +
+        (p.d ? '<div class="hint">' + esc(p.d) + "</div>" : "") +
+        '<input data-aarg="' + c + "," + esc(p.n) + '" value="' + esc(a.args[p.n] ?? "") + '" style="width:100%">' +
+        '<div class="tags">' + names.map((n) => '<span class="chip off" data-ains="' + c + "," + esc(p.n) + "," + esc(n) + '">' + esc(n) + "</span>").join("") + "</div></div>";
+    });
+  }
+  h += '<div class="hint" style="margin-top:6px">列のセリフのあとに、選んだ人がこのアクションを実行します（SkyrimNet の ExecuteAction。クールダウンや実行条件は無視されます）。一覧には、入っている MOD のアクションだけが出ます。人の名前は参加者のボタンで入れられます。{player} はプレイヤーの名前になります。</div>';
+  return h;
+}
+function wireAction() {
+  const d = S.draft, ed = $("editor");
+  ed.querySelectorAll("[data-apick]").forEach((b) => (b.onclick = () => openPicker("action", +b.dataset.apick)));
+  ed.querySelectorAll("[data-awho]").forEach((x) => (x.onclick = () => {
+    const [c, i] = x.dataset.awho.split(",").map(Number); d.cols[c].act.who = i; touch(); renderEditor();
+  }));
+  ed.querySelectorAll("[data-aarg]").forEach((x) => (x.oninput = () => {
+    const at = x.dataset.aarg.indexOf(","), c = +x.dataset.aarg.slice(0, at), n = x.dataset.aarg.slice(at + 1);
+    d.cols[c].act.args[n] = x.value; touch();
+  }));
+  ed.querySelectorAll("[data-ains]").forEach((x) => (x.onclick = () => {
+    const parts = x.dataset.ains.split(","), c = +parts[0], n = parts[1], v = parts.slice(2).join(",");
+    d.cols[c].act.args[n] = v; touch(); renderEditor();
+  }));
+}
+window.dseActions = (list) => {
+  S.actions = Array.isArray(list) ? list : null;
+  if (S.pick && S.pick.c === "action") renderPicker();
+  else if (S.draft && S.draft.cols.some((col) => col.end === 3 && col.act.name)) renderEditor();
+};
 // The places (from the DLL): [spec, name, editorID]. undefined: not asked yet; null: no DLL.
 window.dsePlaces = (list) => {
   S.places = Array.isArray(list) ? list.map(([spec, name, editorID]) => ({ spec, name, editorID: editorID || "" })) : null;
@@ -588,7 +656,7 @@ const SOLO_TAGS = ["femalemasturbation", "malemasturbation", "vaginaltoying", "a
 function genPanel(d) {
   const g = d.gen, busy = !!(S.gen && S.gen.busy);
   let h = '<div class="genbox"><h2>AI でシナリオを作る</h2>';
-  h += '<div class="hint">シナリオライターに選んだ NPC が、その人らしい作風で全部の列を書きます。「全生成」は参加キャラ・ナレーション・セリフ・OStim（タグ）のすべてを書きます。「限定生成」は参加キャラ・ナレーション・OStim（タグ）だけを書き、セリフはオート（中）にします（ゲーム内でその場で作られます）。参加者の BIO・記憶・最近の出来事・日記を参考にし、SN Sexual Memories の相関図があればそれも使います。結果は下の列に入るので、確認・修正してから保存してください。</div>';
+  h += '<div class="hint">シナリオライターに選んだ NPC が、その人らしい作風で全部の列を書きます。「全生成」は参加キャラ・ナレーション・セリフ・セックスシーン（タグ）のすべてを書きます。「限定生成」は参加キャラ・ナレーション・セックスシーン（タグ）だけを書き、セリフはオート（中）にします（ゲーム内でその場で作られます）。参加者の BIO・記憶・最近の出来事・日記を参考にし、SN Sexual Memories の相関図があればそれも使います。結果は下の列に入るので、確認・修正してから保存してください。</div>';
   h += '<div class="grow"><span class="lbl">テーマ</span><div class="fld"><textarea id="g_theme" placeholder="例：酒場で再会した二人。昔の誤解が解けて、思いが通じ合う（空欄ならライターにおまかせ）">' + esc(g.theme) + "</textarea></div></div>";
   h += '<div class="grow"><span class="lbl">シナリオライター</span><div class="fld">' +
     (g.writer ? '<span class="person">' + esc(g.writer.label) + '<button class="small" id="g_wrm">✕</button></span>' : "") +
@@ -759,6 +827,7 @@ function wire() {
   }));
   wireGen();
   wireMove();
+  wireAction();
   wireDropdowns(ed);
 }
 let listTimer = 0;
@@ -771,6 +840,30 @@ function closePicker() { $("picker").classList.remove("open"); S.pick = null; }
 function renderPicker() {
   if (!S.pick) return;
   const q = $("psearch").value.trim().toLowerCase();
+  // A SkyrimNet action (c = "action", i = the column).
+  if (S.pick.c === "action") {
+    $("pload").style.display = "none";
+    let h = "";
+    if (S.actions === undefined) {
+      h = '<div class="grp">アクションの一覧を読み込み中…</div>';
+      askActions();
+    } else if (S.actions === null) {
+      h = '<div class="grp" style="color:var(--danger)">アクションの一覧は DLL（SkyrimNet_DialogueScenarioEditor.dll）が必要です。</div>';
+    } else {
+      const all = S.actions.filter((a) => !q || a.n.toLowerCase().includes(q) || a.m.toLowerCase().includes(q) || a.d.toLowerCase().includes(q));
+      if (!S.actions.length) h += '<div class="grp">使えるアクションがありません（アクションを持つ MOD が入っていません）。</div>';
+      let mod = null;
+      for (const a of all.slice(0, 400)) {
+        if (a.m !== mod) { mod = a.m; h += '<div class="grp">' + esc(mod) + "</div>"; }
+        h += '<div class="npc" data-spec="' + esc(a.n) + '" data-name="' + esc(a.m) + '" title="' + esc(a.d) + '"><span>' + esc(a.n) + '</span><span class="pl">' + esc(a.d.slice(0, 70)) + "</span></div>";
+      }
+      if (all.length > 400) h += '<div class="grp" style="color:var(--muted)">ほか ' + (all.length - 400) + " 件。名前で絞り込んでください</div>";
+    }
+    $("pstat").textContent = "";
+    $("plist").innerHTML = h;
+    $("plist").querySelectorAll(".npc").forEach((r) => (r.onclick = () => choose(r.dataset.spec, r.dataset.name || "")));
+    return;
+  }
   // A place for "move and wait" (c = "place", i = the column), or the scenario's cell (c = "cell").
   if (S.pick.c === "place" || S.pick.c === "cell") {
     $("pload").style.display = "none";
@@ -821,6 +914,7 @@ function choose(spec, name) {
   const d = S.draft, { c, i } = S.pick;
   if (c === "place") { d.cols[i].move.place = { spec, label: name }; touch(); closePicker(); renderEditor(); return; }
   if (c === "cell") { d.cell = { spec, label: name }; touch(); closePicker(); renderEditor(); return; }
+  if (c === "action") { const a = d.cols[i].act; d.cols[i].act = { name: spec, mod: name, who: a.who, args: {} }; touch(); closePicker(); renderEditor(); return; }
   if (c === "writer") { d.gen.writer = { spec, label: name }; touch(); closePicker(); renderEditor(); return; }
   if (c === "people") {
     if (d.gen.people.some((a) => a.spec === spec)) { genStatus("その人はもう参加者にいます。", "err"); closePicker(); return; }
@@ -866,6 +960,12 @@ function save() {
       if (!m.place) { msg((c + 1) + " 列目の行き先を選んでください。", "err"); return false; }
       if (!m.who.some((i) => i < col.actors.length && !isPlayer(col.actors[i].spec))) { msg((c + 1) + " 列目で移動する人を選んでください。", "err"); return false; }
       if (!m.until && !(Number(m.days) > 0)) { msg((c + 1) + " 列目の待機の終わり（シナリオか日数）を決めてください。", "err"); return false; }
+    }
+    if (col.end === 3) {
+      const a = col.act, info = actionInfo(a.name);
+      if (!a.name) { msg((c + 1) + " 列目のアクションを選んでください。", "err"); return false; }
+      const missing = info ? info.p.filter((p) => !p.o && String(a.args[p.n] ?? "").trim() === "").map((p) => p.n) : [];
+      if (missing.length) { msg((c + 1) + " 列目のアクションの必須の引数が空です：" + missing.join(", "), "err"); return false; }
     }
     if (col.auto) continue;
     if (col.lines.some((l) => (l.text.trim() !== "" || l.auto) && (l.who < 0 || l.who >= col.actors.length))) {

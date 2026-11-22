@@ -18,6 +18,11 @@ TEXTS = {
         '$DSE_HeaderScenario': 'Scenarios',
         '$DSE_TriggerKey': 'Key that starts a hotkey scenario',
         '$DSE_TriggerKeyHelp': 'Starts a scenario whose start is set to Hotkey on the settings page, if its conditions are met where you are. No key is set at first: pick one that no other mod uses.',
+        '$DSE_Framework': 'Sex scenes with',
+        '$DSE_FrameworkHelp': 'Which framework plays the sex scenes at the end of a column when both OStim and SexLab are installed. Automatic uses OStim. With only one installed, that one is used whatever is chosen here. SexLab P+ and 1.6x are both supported.',
+        '$DSE_FrameworkAuto': 'Automatic',
+        '$DSE_FrameworkOStim': 'OStim',
+        '$DSE_FrameworkSexLab': 'SexLab',
     },
     'ja': {
         '$DSE_ModName': 'SkyrimNet Dialogue Scenario Editor',
@@ -27,6 +32,11 @@ TEXTS = {
         '$DSE_HeaderScenario': 'シナリオ',
         '$DSE_TriggerKey': 'ホットキーのシナリオを始めるキー',
         '$DSE_TriggerKeyHelp': '設定画面で発火方法を「ホットキー」にしたシナリオを、今いる場所で条件がそろっていれば始めます。最初は割り当てていません。ほかの MOD と重ならないキーを選んでください。',
+        '$DSE_Framework': 'セックスシーンに使う MOD',
+        '$DSE_FrameworkHelp': 'OStim と SexLab の両方が入っているとき、列の最後のセックスシーンにどちらを使うかを選びます。自動なら OStim を使います。片方しか入っていなければ、ここの選択にかかわらずそちらを使います。SexLab は P+ と 1.6x の両方に対応しています。',
+        '$DSE_FrameworkAuto': '自動',
+        '$DSE_FrameworkOStim': 'OStim',
+        '$DSE_FrameworkSexLab': 'SexLab',
     },
 }
 

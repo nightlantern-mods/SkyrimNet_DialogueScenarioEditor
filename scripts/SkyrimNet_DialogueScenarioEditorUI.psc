@@ -28,6 +28,7 @@ int pageView = 0 ; the Magelight view last shown (generation answers come later)
 
 Function Setup()
 	BindHotkey()
+	PushFramework()
 	RegisterForModEvent("Magelight_ViewDomReady", "OnViewDomReady")
 	RegisterForModEvent("Magelight_UIModeExited", "OnUIModeExited")
 	; The same page calls arrive from either host: Magelight UI (numArg = view) or the DLL's
@@ -48,6 +49,8 @@ Function Setup()
 	RegisterForModEvent("DSE_Prisma_dse_generate", "OnPageGenerate")
 	RegisterForModEvent("Magelight_JS_dse_here", "OnPageHere")
 	RegisterForModEvent("DSE_Prisma_dse_here", "OnPageHere")
+	RegisterForModEvent("Magelight_JS_dse_actions", "OnPageActions")
+	RegisterForModEvent("DSE_Prisma_dse_actions", "OnPageActions")
 	RegisterForModEvent("DSE_Gen", "OnGen")
 	sendingNpcs = false
 	usePrisma = UsePrisma()
@@ -74,6 +77,11 @@ int Function Hotkey()
 	Return GetModSettingInt("iHotkey:General")
 EndFunction
 
+; The MCM's scene framework choice (0 automatic, 1 OStim, 2 SexLab) for the main script.
+Function PushFramework()
+	((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).SetFramework(GetModSettingInt("iFramework:General"))
+EndFunction
+
 Function BindHotkey()
 	UnregisterForAllKeys()
 	boundKey = Hotkey()
@@ -89,6 +97,8 @@ EndFunction
 Event OnSettingChange(String a_ID)
 	If a_ID == "iHotkey:General" || a_ID == "iTriggerKey:General"
 		BindHotkey()
+	ElseIf a_ID == "iFramework:General"
+		PushFramework()
 	EndIf
 EndEvent
 
@@ -175,6 +185,7 @@ Function RegisterListeners(int view)
 	Magelight.RegisterListener(view, "dse_generate")
 	Magelight.RegisterListener(view, "dse_places")
 	Magelight.RegisterListener(view, "dse_here")
+	Magelight.RegisterListener(view, "dse_actions")
 EndFunction
 
 ; The places "move and wait" can send people to (from the DLL), for the page's place picker.
@@ -189,6 +200,32 @@ Event OnPagePlaces(string eventName, string strArg, float numArg, Form sender)
 		Return
 	EndIf
 	Js(pageView, "dsePlaces(" + SkyrimNet_DialogueScenarioEditorNative.PlaceList() + ")")
+EndEvent
+
+; The SkyrimNet actions a column can end with: those in the installed mods' action files that
+; SkyrimNet has registered in this game (the rest are blanked out, and the DLL skips them).
+Event OnPageActions(string eventName, string strArg, float numArg, Form sender)
+	int view = numArg as int
+	If view != 0
+		pageView = view
+	EndIf
+	If SkyrimNet_DialogueScenarioEditorNative.Version() < 4
+		Js(pageView, "dseActions(null)")
+		Return
+	EndIf
+	string[] names = SkyrimNet_DialogueScenarioEditorNative.ActionNames()
+	int kept = 0
+	int i = 0
+	While i < names.Length
+		If SkyrimNetApi.IsActionRegistered(names[i])
+			kept += 1
+		Else
+			names[i] = ""
+		EndIf
+		i += 1
+	EndWhile
+	Log("actions: " + kept + " of " + names.Length + " registered")
+	Js(pageView, "dseActions(" + SkyrimNet_DialogueScenarioEditorNative.ActionList(names) + ")")
 EndEvent
 
 ; The player's cell, for a scenario's cell condition ("this cell" on the page).
@@ -293,14 +330,14 @@ EndFunction
 ; NPCs around the player, for quick picking: [baseId, plugin, name].
 Function SendNearby(int view)
 	Actor player = Game.GetPlayer()
-	Actor[] near = OActorUtil.GetActorsInRangeV2(player, 4000.0, false, false)
+	Actor[] near = ((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).NearbyActors(player, 4000.0)
 	Keyword npcKw = Keyword.GetKeyword("ActorTypeNPC")
 	string js = "dseNearby(["
 	bool first = true
 	int i = 0
 	While i < near.Length
 		Actor a = near[i]
-		If a != None && !a.IsDead() && !a.IsChild() && a.HasKeyword(npcKw)
+		If a != None && a != player && !a.IsDead() && !a.IsChild() && a.HasKeyword(npcKw)
 			ActorBase b = a.GetActorBase()
 			If !first
 				js += ","

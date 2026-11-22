@@ -4,7 +4,7 @@
 # model is used.
 plugin:
   name: DialogueScenarioEditor
-  version: "0.2.0"
+  version: "0.3.0"
   description: "SkyrimNet Dialogue Scenario Editor: writes whole scenarios (plot, narration, lines, OStim scenes) on the settings page."
 
 variants:

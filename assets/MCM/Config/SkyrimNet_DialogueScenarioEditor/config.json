@@ -29,6 +29,16 @@
 			"valueOptions": {
 				"sourceType": "ModSettingInt"
 			}
+		},
+		{
+			"id": "iFramework:General",
+			"type": "enum",
+			"text": "$DSE_Framework",
+			"help": "$DSE_FrameworkHelp",
+			"valueOptions": {
+				"options": ["$DSE_FrameworkAuto", "$DSE_FrameworkOStim", "$DSE_FrameworkSexLab"],
+				"sourceType": "ModSettingInt"
+			}
 		}
 	]
 }

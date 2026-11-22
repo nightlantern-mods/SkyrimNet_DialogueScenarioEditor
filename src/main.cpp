@@ -1,5 +1,6 @@
 #include "PrismaUI_API.h"  // first: it sets NOMINMAX and WIN32_LEAN_AND_MEAN before <windows.h>
 
+#include "actions.h"
 #include "generator.h"
 
 #include <algorithm>
@@ -29,7 +30,7 @@ namespace
     constexpr const char* kScript = "SkyrimNet_DialogueScenarioEditorNative";
     constexpr const char* kViewPath = "SkyrimNet_DialogueScenarioEditor/index.html";  // under Data/PrismaUI/views
     constexpr const char* kEventPrefix = "DSE_Prisma_";
-    constexpr const char* kListeners[] = { "dse_ready", "dse_close", "dse_save", "dse_delete", "dse_npcs", "dse_generate", "dse_places", "dse_here" };
+    constexpr const char* kListeners[] = { "dse_ready", "dse_close", "dse_save", "dse_delete", "dse_npcs", "dse_generate", "dse_places", "dse_here", "dse_actions" };
 
     PRISMA_UI_API::IVPrismaUI1* g_prisma = nullptr;
     PrismaView                  g_view = 0;
@@ -123,7 +124,7 @@ namespace
 
     std::int32_t VersionNative(RE::StaticFunctionTag*)
     {
-        return 3;
+        return 5;
     }
 
     // The Papyrus scripts' log: written here so players can send it without turning on Papyrus
@@ -304,6 +305,51 @@ namespace
         return nlohmann::json::array({ spec, name, interior }).dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
     }
 
+    // Everyone loaded near a_center (the player too, and a_center itself if it is an actor), within
+    // a_range: the candidates for a scenario's cast. Replaces OStim's search, so the mod also runs
+    // without OStim. Callers check cells, death and the rest themselves.
+    std::vector<RE::Actor*> NearbyActorsNative(RE::StaticFunctionTag*, RE::TESObjectREFR* a_center, float a_range)
+    {
+        std::vector<RE::Actor*> out;
+        if (!a_center) {
+            return out;
+        }
+        const auto origin = a_center->GetPosition();
+        const auto take = [&](RE::Actor* a) {
+            if (a && a->Is3DLoaded() && a->GetPosition().GetDistance(origin) <= a_range &&
+                std::find(out.begin(), out.end(), a) == out.end()) {
+                out.push_back(a);
+            }
+        };
+        take(RE::PlayerCharacter::GetSingleton());
+        if (const auto lists = RE::ProcessLists::GetSingleton()) {
+            for (const auto& handle : lists->highActorHandles) {
+                take(handle.get().get());
+            }
+        }
+        return out;
+    }
+
+    // ---- SkyrimNet actions (the column end "a SkyrimNet action") ----
+    std::vector<RE::BSFixedString> ActionNamesNative(RE::StaticFunctionTag*)
+    {
+        std::vector<RE::BSFixedString> out;
+        for (const auto& name : Actions::Names()) {
+            out.emplace_back(name.c_str());
+        }
+        return out;
+    }
+
+    RE::BSFixedString ActionListNative(RE::StaticFunctionTag*, std::vector<RE::BSFixedString> a_registered)
+    {
+        std::vector<std::string> names;
+        names.reserve(a_registered.size());
+        for (const auto& name : a_registered) {
+            names.emplace_back(name.c_str());
+        }
+        return Actions::ListJson(names);
+    }
+
     // The inside door of a place chosen on the page (its spec), or None.
     RE::TESObjectREFR* PlaceAnchorNative(RE::StaticFunctionTag*, RE::BSFixedString a_spec)
     {
@@ -328,6 +374,9 @@ namespace
         a_vm->RegisterFunction("Version", kScript, VersionNative);
         a_vm->RegisterFunction("Log", kScript, LogNative);
         a_vm->RegisterFunction("HereCell", kScript, HereCellNative);
+        a_vm->RegisterFunction("ActionNames", kScript, ActionNamesNative);
+        a_vm->RegisterFunction("ActionList", kScript, ActionListNative);
+        a_vm->RegisterFunction("NearbyActors", kScript, NearbyActorsNative);
         a_vm->RegisterFunction("NpcList", kScript, NpcListNative);
         a_vm->RegisterFunction("PlaceList", kScript, PlaceListNative);
         a_vm->RegisterFunction("PlaceAnchor", kScript, PlaceAnchorNative);
