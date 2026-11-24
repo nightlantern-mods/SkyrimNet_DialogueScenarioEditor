@@ -805,7 +805,10 @@ Function RunColumn(string file, int c, Actor[] cast)
 	Log("gathered in " + Elapsed(gatherStart))
 
 	; From the second column on, earlier columns' scene talk must not hold this column's lines
-	; back: drop what is queued (the line being spoken still finishes). Chosen by the user.
+	; back: drop what is queued (the line being spoken still finishes). Chosen by the user. But
+	; first let what is being said end (up to 20 s): 2026-11-24, an NPC's own reaction to the
+	; scene that had just started (5 pieces) was cut after its first piece by this purge (the
+	; user's choice: wait, then purge).
 	; Auto column: every line is made up when it is spoken (short / medium / long = 3 / 6 / 10),
 	; the participants taking turns.
 	bool autoColumn = JsonUtil.GetIntValue(file, col + "auto", 0) != 0
@@ -818,7 +821,11 @@ Function RunColumn(string file, int c, Actor[] cast)
 	EndIf
 
 	If c > 0 && lines > 0
+		WaitForSilence(20.0)
 		SkyrimNetApi.PurgeDialogue(true)
+		; Pieces dropped here never send AudioEnded: they must not count as still due.
+		anyRemaining = 0
+		anyEndAt = Utility.GetCurrentRealTime()
 		Log("purged queued dialogue from earlier columns")
 	EndIf
 	Log(lines + " line(s), auto column " + autoColumn)
