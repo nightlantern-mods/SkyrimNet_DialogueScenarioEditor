@@ -28,6 +28,9 @@ string Property CommonFile = "SkyrimNet_DialogueScenarioEditor_Common" AutoReadO
 ; is only emptied, so a reinstall or update of the mod brings a shipped example back: this list keeps
 ; it deleted. Written only by the page's Delete and Save (the UI script).
 string Property DeletedFile = "SkyrimNet_DialogueScenarioEditor_Deleted" AutoReadOnly
+; The sex scenes the player excluded in the editor ("scenes": scene IDs or their beginnings). The
+; mod's own file, written only when the player saves the list in the page.
+string Property ExcludeFile = "SkyrimNet_DialogueScenarioEditor_Exclude" AutoReadOnly
 int Property MaxColumns = 10 AutoReadOnly
 int Property MaxPerColumn = 3 AutoReadOnly
 int Property MaxLines = 10 AutoReadOnly
@@ -37,9 +40,15 @@ float Property ExteriorRange = 3000.0 AutoReadOnly
 float Property NpcSpeechTimeout = 45.0 AutoReadOnly
 float Property PlayerSpeechTimeout = 20.0 AutoReadOnly
 int Property QuietMs = 2500 AutoReadOnly
+; A line counts as over this long after the last audio ended (nothing queued) when SkyrimNet did
+; not report every piece played; long enough not to cut a piece still playing.
+int Property LongQuietMs = 5000 AutoReadOnly
+; The same when SkyrimNet's last AudioEnded said pieces remain: one may still be playing.
+int Property PiecePendingQuietMs = 15000 AutoReadOnly
 float Property WarpAfter = 8.0 AutoReadOnly
 float Property SettleAfterMove = 3.0 AutoReadOnly
 float Property NearDistance = 260.0 AutoReadOnly
+float Property BedRadius = 1500.0 AutoReadOnly ; how far from the first participant a scene's bed may be
 string Property SoloActions = "femalemasturbation,malemasturbation,vaginaltoying,analtoying,rubbingclitoris" AutoReadOnly
 
 bool running = false
@@ -52,6 +61,12 @@ float watchStart = 0.0     ; real time the current speech wait started
 Keyword npcKeyword
 int loadCount = 0 ; bumped on every load
 int runLoad = 0   ; loadCount when the current run started
+; Where the player was when the run started, and whether they have left it since (see PlayerLeft).
+Cell runCell
+WorldSpace runWorld
+float runX = 0.0
+float runY = 0.0
+bool playerLeft = false
 
 ; Keeping the column's cast together while it talks (see Hold).
 bool holding = false
@@ -74,6 +89,10 @@ Function Setup()
 	dllLog = SkyrimNet_DialogueScenarioEditorNative.Version() >= 2
 	npcKeyword = Keyword.GetKeyword("ActorTypeNPC")
 	RegisterSpeechEvents()
+	; The real-time clock starts again on load: times saved from before mean nothing now.
+	anyStartAt = 0.0
+	anyEndAt = 0.0
+	anyRemaining = 0
 	loadCount += 1
 	lastGlobalWhy = ""
 	StorageUtil.ClearStringValuePrefix("DSE:why:")
@@ -89,7 +108,41 @@ EndFunction
 ; A save made in the middle of an event brings the half-done run back with it. Its speech state
 ; is gone, so it stops instead of carrying on (it would otherwise jump to the next line at once).
 bool Function Interrupted()
-	Return runLoad != loadCount
+	Return runLoad != loadCount || PlayerLeft()
+EndFunction
+
+; The player left the place the run started in: another interior cell (or out of it), or, when it
+; started outdoors, into an interior, another worldspace or farther than ExteriorRange from where
+; it started. 2026-11-24: event1 started in Riverwood, the player walked into Faendal's house two
+; seconds later, SkyrimNet dropped the lines of Faendal (left outside, too far away) and the run
+; waited for speech that never came. The run then stops (and counts as not run, see TryStart).
+bool Function PlayerLeft()
+	If playerLeft
+		Return true
+	EndIf
+	If !running || runCell == None
+		Return false
+	EndIf
+	Actor player = Game.GetPlayer()
+	Cell now = player.GetParentCell()
+	If now == None || now == runCell
+		Return false
+	EndIf
+	bool left = false
+	If runCell.IsInterior() || now.IsInterior()
+		left = true
+	ElseIf player.GetWorldSpace() != runWorld
+		left = true
+	Else
+		float dx = player.GetPositionX() - runX
+		float dy = player.GetPositionY() - runY
+		left = Math.Sqrt(dx * dx + dy * dy) > ExteriorRange
+	EndIf
+	If left
+		playerLeft = true
+		Log("the player left the place the scenario started in (" + runCell.GetName() + " " + runCell + " -> " + now.GetName() + " " + now + "): stopping it")
+	EndIf
+	Return left
 EndFunction
 
 ; Returns the delay before the next check.
@@ -169,6 +222,46 @@ Function ForgetRuns(string name)
 	StorageUtil.UnsetFormValue(self, id + ":cell")
 	StorageUtil.UnsetStringValue(None, "DSE:why:" + EventFolder + "/" + name + ".json")
 	Log("run record of " + name + " cleared (had one: " + had + ")")
+EndFunction
+
+; A scenario's run record in this save, as JSON for the page: [days since it last started, whether
+; that run finished (1) or not (0: still running, or stopped), "the cell it is blocked in" ("" none)];
+; null when it has never run.
+string Function RunEntry(string name)
+	string id = StateKey(EventFolder + "/" + name + ".json")
+	float last = StorageUtil.GetFloatValue(self, id + ":last", -1.0)
+	If last < 0.0
+		Return "null"
+	EndIf
+	float done = StorageUtil.GetFloatValue(self, id + ":done", -1.0)
+	Cell blocked = StorageUtil.GetFormValue(self, id + ":cell") as Cell
+	string cellName = ""
+	If blocked != None
+		cellName = blocked.GetName()
+		If cellName == ""
+			cellName = "(" + blocked.GetFormID() + ")"
+		EndIf
+	EndIf
+	float ago = Utility.GetCurrentGameTime() - last
+	If ago < 0.0
+		ago = 0.0
+	EndIf
+	Return "[" + ago + "," + ((done >= last) as int) + ",\"" + JsonText(cellName) + "\"]"
+EndFunction
+
+string Function JsonText(string s)
+	string out = ""
+	int i = 0
+	int n = StringUtil.GetLength(s)
+	While i < n
+		string ch = StringUtil.GetNthChar(s, i)
+		If ch == "\"" || ch == "\\"
+			out += "\\"
+		EndIf
+		out += ch
+		i += 1
+	EndWhile
+	Return out
 EndFunction
 
 ; The scenario hotkey (MCM, handled by the UI script): starts the first scenario set to start with
@@ -477,6 +570,11 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 	runStart = Utility.GetCurrentGameTime()
 	runLoad = loadCount
 	runReal = Utility.GetCurrentRealTime()
+	runCell = here
+	runWorld = player.GetWorldSpace()
+	runX = player.GetPositionX()
+	runY = player.GetPositionY()
+	playerLeft = false
 	StorageUtil.FormListClear(self, TouchedList)
 	Log("==== start " + ScenarioName(file) + " in " + here.GetName() + " (" + LocationWord(interior) + ") ====")
 	Log("file: " + MiscUtil.ReadFromFile("Data/SKSE/Plugins/StorageUtilData/" + file))
@@ -497,9 +595,19 @@ bool Function TryStart(string file, Actor[] nearby, Cell here, bool interior)
 		s += 1
 	EndWhile
 	RunSetup(file, slots)
+	bool left = PlayerLeft()
 	running = false
+	runCell = None
+	playerLeft = false
 	StorageUtil.FormListClear(self, TouchedList)
-	If Interrupted()
+	If left
+		; Stopped because the player walked away: it counts as not run, so it can start again once
+		; everyone is together (the user's choice, 2026-11-24).
+		StorageUtil.UnsetFloatValue(self, id + ":last")
+		StorageUtil.UnsetFormValue(self, id + ":cell")
+		Log("stopped " + ScenarioName(file) + " after " + Elapsed(runReal) + ": the player left; it counts as not run")
+		Notify(ScenarioName(file) + " stopped: you left the place")
+	ElseIf Interrupted()
 		Log("stopped " + ScenarioName(file) + " (a save made during the event was loaded)")
 	Else
 		Log("==== done " + ScenarioName(file) + " after " + Elapsed(runReal) + " ====")
@@ -772,13 +880,21 @@ Function RunColumn(string file, int c, Actor[] cast)
 	If Interrupted()
 		Return
 	EndIf
-	Log("column " + (c + 1) + " ends with " + ending + " (0 nothing, 1 OStim, 2 move and wait, 3 action) at " + Elapsed(runReal))
+	Log("column " + (c + 1) + " ends with " + ending + " (0 nothing, 1 OStim, 2 move and wait, 3 action, 4 stop the scene) at " + Elapsed(runReal))
 	If ending == 1
-		StartScene(cast, JsonUtil.GetStringValue(file, col + "tags", ""))
+		StartScene(cast, JsonUtil.GetStringValue(file, col + "tags", ""), JsonUtil.GetIntValue(file, col + "bed", 0))
 	ElseIf ending == 2
 		MoveAway(file, col, cast)
 	ElseIf ending == 3
 		RunAction(file, col, cast)
+	ElseIf ending == 4
+		; Once the last line has been heard; a cast not in a scene (any more) is left as it is.
+		WaitForSilence(20.0)
+		If AnyInScene(cast)
+			StopScenesOf(cast)
+		Else
+			Log("stop the scene: no one of the column is in a scene, nothing to stop")
+		EndIf
 	EndIf
 EndFunction
 
@@ -1095,6 +1211,10 @@ Function Hold()
 	If !holding
 		Return
 	EndIf
+	; The player left: nobody is pulled after them (the run is stopping).
+	If PlayerLeft()
+		Return
+	EndIf
 	holdTick += 1
 	If holdTick < 3
 		Return
@@ -1205,7 +1325,7 @@ Function Rekick(Actor a)
 	a.EvaluatePackage()
 	; Only a fight between people of the column: a target from outside it (the player, picked by the
 	; AI's own action, 2026-11-22) is not pushed on.
-	If target != None && (holdCast == None || holdCast.Find(target) < 0)
+	If target != None && (!holdCast || holdCast.Find(target) < 0)
 		Log(a.GetDisplayName() + " fights " + target.GetDisplayName() + ", who is not in this column: not started again")
 		Return
 	EndIf
@@ -1222,7 +1342,8 @@ EndFunction
 ; blows (a brawl the AI started from the talk, 2026-11-22). Their lines stay: only that package is
 ; taken off anyone of the column who is fighting, through SkyrimNet's own UnregisterPackage.
 Function FreeFightersFromTalk()
-	If holdCast == None
+	; "holdCast == None" casts None to Actor[] and logs a Papyrus error each time (twice a second).
+	If !holdCast
 		Return
 	EndIf
 	Actor player = Game.GetPlayer()
@@ -1482,6 +1603,12 @@ Actor watchSpeaker
 int piecesStarted = 0
 int piecesEnded = 0
 bool replyWritten = false
+int staleEventId = -1 ; an earlier reply of the watched speaker's, whose pieces do not count
+int lastRemaining = -1 ; remainingQueueSize of this line's last AudioEnded: pieces still to play (-1 none yet)
+; Anyone's speech (also SkyrimNet's own replies outside the scenario), for WaitForSilence.
+float anyStartAt = 0.0 ; real time of the last voiced SpeechStarted
+float anyEndAt = 0.0   ; real time of the last AudioEnded
+int anyRemaining = 0   ; remainingQueueSize of the last AudioEnded
 
 Function RegisterSpeechEvents()
 	RegisterForModEvent("SkyrimNet_SpeechStarted", "OnSkyrimNetSpeechStarted")
@@ -1489,8 +1616,36 @@ Function RegisterSpeechEvents()
 	RegisterForModEvent("SkyrimNet_AudioEnded", "OnSkyrimNetAudioEnded")
 EndFunction
 
+; "sourceEventId":N in an AudioEnded payload; 0 when it has none.
+int Function SourceEventId(string json)
+	Return JsonInt(json, "sourceEventId", 0)
+EndFunction
+
+; "key":N (a whole number) in an event payload; missing when it has none.
+int Function JsonInt(string json, string keyName, int missing)
+	string k = "\"" + keyName + "\":"
+	int at = StringUtil.Find(json, k)
+	If at < 0
+		Return missing
+	EndIf
+	at += StringUtil.GetLength(k)
+	string digits = ""
+	string ch = StringUtil.GetNthChar(json, at)
+	While ch != "" && StringUtil.IsDigit(ch)
+		digits += ch
+		at += 1
+		ch = StringUtil.GetNthChar(json, at)
+	EndWhile
+	If digits == ""
+		Return missing
+	EndIf
+	Return digits as int
+EndFunction
+
 Function BeginWatch(Actor speaker)
 	watchSpeaker = speaker
+	staleEventId = -1
+	lastRemaining = -1
 	piecesStarted = 0
 	piecesEnded = 0
 	replyWritten = false
@@ -1518,7 +1673,12 @@ Function LogSpeechEvent(string what, string strArg, float numArg, Form sender)
 EndFunction
 
 Event OnSkyrimNetSpeechStarted(string eventName, string strArg, float numArg, Form sender)
-	If watchSpeaker != None && sender == watchSpeaker
+	; A narration piece (*backs toward the door*) is not voiced: no AudioEnded comes for it.
+	bool voiced = StringUtil.Find(strArg, "\"isNarration\":true") < 0
+	If voiced
+		anyStartAt = Utility.GetCurrentRealTime()
+	EndIf
+	If watchSpeaker != None && sender == watchSpeaker && voiced
 		piecesStarted += 1
 	EndIf
 	LogSpeechEvent("SpeechStarted", strArg, numArg, sender)
@@ -1532,8 +1692,23 @@ Event OnSkyrimNetSpeechComplete(string eventName, string strArg, float numArg, F
 EndEvent
 
 Event OnSkyrimNetAudioEnded(string eventName, string strArg, float numArg, Form sender)
+	anyEndAt = Utility.GetCurrentRealTime()
+	anyRemaining = JsonInt(strArg, "remainingQueueSize", 0)
 	If watchSpeaker != None && sender == watchSpeaker
-		piecesEnded += 1
+		; A piece of an earlier reply of theirs (still playing when this line was asked for) is not
+		; this line's: it ended before any piece of this one started, or it has that reply's event
+		; ID. 2026-11-23: Sigrid's reply to line 1 ended right after line 2 was asked for, line 2
+		; counted as heard, and the player's next line cut line 2 off when it came.
+		int eventId = SourceEventId(strArg)
+		If piecesStarted == 0
+			staleEventId = eventId
+			Log("  (an earlier reply's piece, event " + eventId + ": not this line's)")
+		ElseIf eventId != 0 && eventId == staleEventId
+			Log("  (still the earlier reply, event " + eventId + ": not this line's)")
+		Else
+			piecesEnded += 1
+			lastRemaining = JsonInt(strArg, "remainingQueueSize", -1)
+		EndIf
 	EndIf
 	LogSpeechEvent("AudioEnded", strArg, numArg, sender)
 EndEvent
@@ -1565,13 +1740,30 @@ bool Function WaitForSpeech(float timeout)
 			Return false
 		EndIf
 		; The player's line (TransformDialogue) sends no SpeechComplete: every started piece has
-		; played and a short quiet follows. Also the no-events fallback.
-		If !replyWritten && piecesEnded > 0 && piecesEnded >= piecesStarted
+		; played and a short quiet follows. A piece of this line must have started (an earlier
+		; reply's end alone is not this line's).
+		If !replyWritten && piecesStarted > 0 && piecesEnded >= piecesStarted
 			If SkyrimNetApi.GetTimeSinceLastAudioEnded() >= 1500 && SkyrimNetApi.GetSpeechQueueSize() == 0
 				Log("speech done after " + Elapsed(watchStart) + " (" + piecesEnded + "/" + piecesStarted + " pieces played, then quiet)")
 				watchSpeaker = None
 				Return true
 			EndIf
+		EndIf
+		; SkyrimNet does not always send an AudioEnded for every piece (2026-11-24: Sigrid's auto
+		; line, 4 pieces, one AudioEnded; the wait ran to its 45 s limit, 41 s after the last audio
+		; ended). Some of this line has played, nothing is queued and nobody has been heard for a
+		; while: it is over. But a last piece still playing is quiet too (no AudioEnded until it
+		; ends): when the last AudioEnded said pieces remain (remainingQueueSize > 0), the quiet must
+		; be far longer (2026-11-24: 5 s after Sigrid's first piece the player's line started while
+		; her second one still played).
+		int quietNeeded = LongQuietMs
+		If lastRemaining != 0
+			quietNeeded = PiecePendingQuietMs
+		EndIf
+		If piecesStarted > 0 && piecesEnded > 0 && SkyrimNetApi.GetSpeechQueueSize() == 0 && SkyrimNetApi.GetTimeSinceLastAudioEnded() >= quietNeeded
+			Log("speech done after " + Elapsed(watchStart) + " (" + piecesEnded + "/" + piecesStarted + " pieces reported played, written " + replyWritten + ", last said " + lastRemaining + " remaining; nothing queued and quiet for " + quietNeeded + " ms)")
+			watchSpeaker = None
+			Return true
 		EndIf
 	EndWhile
 	Log("speech wait timed out after " + timeout + " s (pieces ended " + piecesEnded + " / started " + piecesStarted + ", written " + replyWritten + ", speech queue " + SkyrimNetApi.GetSpeechQueueSize() + ", ms since audio ended " + SkyrimNetApi.GetTimeSinceLastAudioEnded() + ")")
@@ -1580,11 +1772,15 @@ bool Function WaitForSpeech(float timeout)
 EndFunction
 
 ; Waits until nobody has spoken for QuietMs and nothing is queued (used before a scene starts).
+; Also waits while anyone's audio is still due (AudioPending): SkyrimNet's own replies (an NPC
+; reacting by itself, outside the scenario) play too, and the time since the last audio ended grows
+; while one of them is playing. 2026-11-24: the player's next line started 2.8 s after Sigrid's line
+; ended and cut off her own reaction to it, which was playing (the AudioEnded had said 1 remaining).
 Function WaitForSilence(float timeout)
 	float waited = 0.0
 	While waited < timeout
 		int since = SkyrimNetApi.GetTimeSinceLastAudioEnded()
-		If (since == 0 || since >= QuietMs) && SkyrimNetApi.GetSpeechQueueSize() == 0
+		If (since == 0 || since >= QuietMs) && SkyrimNetApi.GetSpeechQueueSize() == 0 && !AudioPending()
 			If waited > 0.0
 				Log("waited " + waited + " s for silence")
 			EndIf
@@ -1594,7 +1790,13 @@ Function WaitForSilence(float timeout)
 		waited += 0.5
 		Hold()
 	EndWhile
-	Log("silence wait timed out after " + timeout + " s (speech queue " + SkyrimNetApi.GetSpeechQueueSize() + ", ms since audio ended " + SkyrimNetApi.GetTimeSinceLastAudioEnded() + ")")
+	Log("silence wait timed out after " + timeout + " s (speech queue " + SkyrimNetApi.GetSpeechQueueSize() + ", ms since audio ended " + SkyrimNetApi.GetTimeSinceLastAudioEnded() + ", audio pending " + AudioPending() + ", last remaining " + anyRemaining + ")")
+EndFunction
+
+; Whether anyone's audio is still due: a voiced piece started (SpeechStarted) after the last
+; AudioEnded, or the last AudioEnded said more remain in SkyrimNet's audio queue.
+bool Function AudioPending()
+	Return anyStartAt > anyEndAt || anyRemaining > 0
 EndFunction
 
 ; --------------------------------------------------------------------------------------------
@@ -1696,19 +1898,62 @@ Actor[] Function NearbyActors(ObjectReference center, float range)
 	Return MiscUtil.ScanCellNPCs(center, range, None, false)
 EndFunction
 
-; The column's sex scene with its tags (OStim's; SexLab gets the matching SexLab tags).
-Function StartScene(Actor[] cast, string tags)
+; The column's sex scene with its tags (OStim's; SexLab gets the matching SexLab tags). bed: 0 as the
+; framework's own settings, 1 on a bed within BedRadius of the first participant (none there: as 0),
+; 2 never on a bed or furniture.
+Function StartScene(Actor[] cast, string tags, int bed)
 	WaitForSilence(20.0)
+	If SwitchScene(cast, tags, bed)
+		Return
+	EndIf
 	StopScenesOf(cast)
 	If npcKeyword == None
 		Setup()
 	EndIf
+	string[] excluded = ExcludedScenes()
+	If excluded.Length > 0
+		Log("excluded scenes: " + PapyrusUtil.StringJoin(excluded, ", "))
+	EndIf
+	ObjectReference bedRef = None
+	If bed == 1
+		If SceneWithOStim()
+			bedRef = SkyrimNet_DialogueScenarioEditorOS.FindBed(cast.Length, cast[0], BedRadius)
+		ElseIf slApi != None
+			bedRef = SkyrimNet_DialogueScenarioEditorSL.FindBed(slApi, cast[0], BedRadius)
+		EndIf
+		If bedRef == None
+			Log("bed: none free within " + BedRadius as int + " units of " + Who(cast[0]) + ", starting as usual")
+		Else
+			Log("bed: " + bedRef.GetDisplayName() + " " + bedRef + " at " + cast[0].GetDistance(bedRef) as int + " units")
+		EndIf
+	ElseIf bed == 2
+		Log("bed: not used (the scenario says so)")
+	EndIf
 	If SceneWithOStim()
-		int thread = SkyrimNet_DialogueScenarioEditorOS.StartScene(cast, tags, SoloActions)
-		If thread == -1
+		string sceneId = ""
+		If bedRef != None
+			string furnType = SkyrimNet_DialogueScenarioEditorOS.FurnitureType(bedRef)
+			sceneId = SkyrimNet_DialogueScenarioEditorOS.ChooseScene(cast, tags, SoloActions, bedRef, excluded)
+			If sceneId == ""
+				Log("bed: OStim has no scene for the tags on this bed (type '" + furnType + "'), or only excluded ones: starting without the bed")
+				bedRef = None
+			Else
+				Log("bed: scene looked up for furniture type '" + furnType + "'")
+			EndIf
+		EndIf
+		If sceneId == ""
+			sceneId = SkyrimNet_DialogueScenarioEditorOS.ChooseScene(cast, tags, SoloActions, None, excluded)
+		EndIf
+		If sceneId == ""
 			Notify("no OStim scene fits " + cast.Length + " actors")
+			Log("OStim: no scene fits " + cast.Length + " actor(s) with tags '" + tags + "' (excluded scenes left out)")
 			Return
-		ElseIf thread < 0
+		EndIf
+		MoveOntoBed(cast, bedRef)
+		; Written before it starts, so a scene that crashes the game is in the log.
+		Log("OStim scene " + sceneId + " (exclude it in the editor's \"excluded scenes\" if it breaks)")
+		int thread = SkyrimNet_DialogueScenarioEditorOS.StartWith(cast, sceneId, bed, bedRef)
+		If thread < 0
 			Notify("OStim refused these actors")
 			Return
 		EndIf
@@ -1728,14 +1973,15 @@ Function StartScene(Actor[] cast, string tags)
 	EndIf
 	string[] slTags = SkyrimNet_DialogueScenarioEditorSL.SexLabTags(tags)
 	Log(FrameworkName() + ": " + cast.Length + " actor(s), OStim tags '" + tags + "' -> SexLab tags '" + PapyrusUtil.StringJoin(slTags, ",") + "'")
+	MoveOntoBed(cast, bedRef)
 	int slThread
 	If slLegacy
-		slThread = SkyrimNet_DialogueScenarioEditorSL16.StartScene(slApi, cast, slTags)
+		slThread = SkyrimNet_DialogueScenarioEditorSL16.StartScene(slApi, cast, slTags, bed, bedRef, excluded)
 	Else
-		slThread = SkyrimNet_DialogueScenarioEditorSLP.StartScene(slApi, cast, slTags)
+		slThread = SkyrimNet_DialogueScenarioEditorSLP.StartScene(slApi, cast, slTags, bed, bedRef, excluded)
 	EndIf
 	If slThread < 0
-		Notify("SexLab refused these actors")
+		Notify("no SexLab scene fits these actors, or SexLab refused them")
 		Return
 	EndIf
 	float slWaited = 0.0
@@ -1743,8 +1989,89 @@ Function StartScene(Actor[] cast, string tags)
 		Utility.Wait(0.5)
 		slWaited += 0.5
 	EndWhile
-	Log("SexLab thread " + slThread + " active " + AnyInScene(cast) + " after " + slWaited + " s")
+	Log("SexLab thread " + slThread + " active " + AnyInScene(cast) + " after " + slWaited + " s, scene " + SexLabScene(slThread) + " (exclude it in the editor's \"excluded scenes\" if it breaks)")
 	Utility.Wait(1.0)
+EndFunction
+
+; With the player in the cast, everyone is moved onto the bed just before the scene starts, as
+; SkyrimNet Brothel does (skyrimnet_Brothel.psc, StartBrothelScene). 2026-11-24: four scenes
+; started with the pair 450-490 units from the bed crashed the game in the player's behavior graph
+; as OStim began them; Brothel moves the pair first and has not crashed (the suspected cause, not a
+; proven one). Without the player nobody is moved (the framework moves them itself).
+Function MoveOntoBed(Actor[] cast, ObjectReference bedRef)
+	If bedRef == None || cast.Find(Game.GetPlayer()) < 0
+		Return
+	EndIf
+	int k = 0
+	While k < cast.Length
+		If cast[k] != None
+			cast[k].MoveTo(bedRef, 40.0 * k, 0.0, 0.0)
+		EndIf
+		k += 1
+	EndWhile
+	Log("bed: moved " + cast.Length + " actor(s) onto " + bedRef.GetDisplayName() + " before the scene (the player is in it)")
+EndFunction
+
+; The SexLab scene (P+) or animation (1.6x) the thread plays, for the log.
+string Function SexLabScene(int tid)
+	If slLegacy
+		Return SkyrimNet_DialogueScenarioEditorSL16.ActiveScene(slApi, tid)
+	EndIf
+	Return SkyrimNet_DialogueScenarioEditorSLP.ActiveScene(slApi, tid)
+EndFunction
+
+; The scenes the player excluded in the editor (scene IDs or their beginnings; one per entry).
+string[] Function ExcludedScenes()
+	Return JsonUtil.StringListToArray(ExcludeFile, "scenes")
+EndFunction
+
+; When exactly this cast is still in one scene together (an earlier column's), that scene changes to
+; one for the tags without ending, so nobody stands up, redresses and undresses again in between.
+; It stays where it is (on its bed or not): the column's bed choice is not applied. Returns whether
+; it changed; False (not the same people, or no scene fits) has the caller stop it and start anew.
+bool Function SwitchScene(Actor[] cast, string tags, int bed)
+	If !AnyInScene(cast)
+		Return false
+	EndIf
+	string bedNote = ""
+	If bed != 0
+		bedNote = " (the column's bed choice is not applied: the scene stays where it is)"
+	EndIf
+	string[] excluded = ExcludedScenes()
+	If SceneWithOStim()
+		string sceneId = SkyrimNet_DialogueScenarioEditorOS.SwitchScene(cast, tags, SoloActions, excluded)
+		If sceneId == ""
+			Log("OStim: no switch in place (not the same people in one scene, or no scene fits the tags there): stopping and starting anew")
+			Return false
+		EndIf
+		Log("OStim: same " + cast.Length + " actor(s) still in a scene, switched it to " + sceneId + " for tags '" + tags + "'" + bedNote)
+		Utility.Wait(1.0)
+		Return true
+	EndIf
+	If slApi == None
+		Return false
+	EndIf
+	string[] slTags = SkyrimNet_DialogueScenarioEditorSL.SexLabTags(tags)
+	bool switched
+	string what = ""
+	If slLegacy
+		switched = SkyrimNet_DialogueScenarioEditorSL16.SwitchScene(slApi, cast, slTags, excluded)
+		If switched
+			Utility.Wait(0.5)
+			what = "to " + SkyrimNet_DialogueScenarioEditorSL16.ActiveSceneOf(slApi, cast[0])
+		EndIf
+	Else
+		what = SkyrimNet_DialogueScenarioEditorSLP.SwitchScene(slApi, cast, slTags, excluded)
+		switched = what != ""
+		what = "to " + what
+	EndIf
+	If !switched
+		Log(FrameworkName() + ": no switch in place (not the same people in one scene, or no scene fits the tags): stopping and starting anew")
+		Return false
+	EndIf
+	Log(FrameworkName() + ": same " + cast.Length + " actor(s) still in a scene, switched it " + what + " for SexLab tags '" + PapyrusUtil.StringJoin(slTags, ",") + "'" + bedNote)
+	Utility.Wait(1.0)
+	Return true
 EndFunction
 
 ; Anyone still in a scene (an earlier column's, or any other) has that scene stopped first, so the

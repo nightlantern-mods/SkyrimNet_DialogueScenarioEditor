@@ -30,7 +30,7 @@ namespace
     constexpr const char* kScript = "SkyrimNet_DialogueScenarioEditorNative";
     constexpr const char* kViewPath = "SkyrimNet_DialogueScenarioEditor/index.html";  // under Data/PrismaUI/views
     constexpr const char* kEventPrefix = "DSE_Prisma_";
-    constexpr const char* kListeners[] = { "dse_ready", "dse_close", "dse_save", "dse_delete", "dse_npcs", "dse_generate", "dse_places", "dse_here", "dse_actions" };
+    constexpr const char* kListeners[] = { "dse_ready", "dse_close", "dse_save", "dse_delete", "dse_npcs", "dse_generate", "dse_places", "dse_here", "dse_actions", "dse_forget", "dse_exclude" };
 
     PRISMA_UI_API::IVPrismaUI1* g_prisma = nullptr;
     PrismaView                  g_view = 0;

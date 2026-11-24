@@ -14,6 +14,7 @@ string Property ViewName = "main" AutoReadOnly
 string Property SetupFolder = "SkyrimNet_DialogueScenarioEditor" AutoReadOnly
 string Property SetupDisk = "Data/SKSE/Plugins/StorageUtilData/SkyrimNet_DialogueScenarioEditor/" AutoReadOnly
 string Property DeletedFile = "SkyrimNet_DialogueScenarioEditor_Deleted" AutoReadOnly ; same as the main script's
+string Property ExcludeFile = "SkyrimNet_DialogueScenarioEditor_Exclude" AutoReadOnly ; same as the main script's
 int Property ChunkChars = 3000 AutoReadOnly
 
 int boundKey = 0
@@ -51,6 +52,10 @@ Function Setup()
 	RegisterForModEvent("DSE_Prisma_dse_here", "OnPageHere")
 	RegisterForModEvent("Magelight_JS_dse_actions", "OnPageActions")
 	RegisterForModEvent("DSE_Prisma_dse_actions", "OnPageActions")
+	RegisterForModEvent("Magelight_JS_dse_forget", "OnPageForget")
+	RegisterForModEvent("DSE_Prisma_dse_forget", "OnPageForget")
+	RegisterForModEvent("Magelight_JS_dse_exclude", "OnPageExclude")
+	RegisterForModEvent("DSE_Prisma_dse_exclude", "OnPageExclude")
 	RegisterForModEvent("DSE_Gen", "OnGen")
 	sendingNpcs = false
 	usePrisma = UsePrisma()
@@ -186,6 +191,8 @@ Function RegisterListeners(int view)
 	Magelight.RegisterListener(view, "dse_places")
 	Magelight.RegisterListener(view, "dse_here")
 	Magelight.RegisterListener(view, "dse_actions")
+	Magelight.RegisterListener(view, "dse_forget")
+	Magelight.RegisterListener(view, "dse_exclude")
 EndFunction
 
 ; The places "move and wait" can send people to (from the DLL), for the page's place picker.
@@ -307,7 +314,23 @@ Function SendAll(int view)
 	Js(view, "dseBegin(\"" + Esc(Game.GetPlayer().GetDisplayName()) + "\"," + ((SkyrimNet_DialogueScenarioEditorNative.Version() > 0) as int) + ")")
 	SendSetups(view)
 	SendNearby(view)
+	SendExcluded(view)
 	Js(view, "dseEnd()")
+EndFunction
+
+; The excluded sex scenes, for the page's list.
+Function SendExcluded(int view)
+	string[] scenes = JsonUtil.StringListToArray(ExcludeFile, "scenes")
+	string js = "dseExclude(["
+	int i = 0
+	While i < scenes.Length
+		If i > 0
+			js += ","
+		EndIf
+		js += "\"" + Esc(scenes[i]) + "\""
+		i += 1
+	EndWhile
+	Js(view, js + "])")
 EndFunction
 
 Function SendSetups(int view)
@@ -322,6 +345,7 @@ Function SendSetups(int view)
 		string base = StringUtil.Substring(name, 0, StringUtil.GetLength(name) - 5)
 		If IsSafeName(base) && StringUtil.Find(text, "{") >= 0 && !JsonUtil.StringListHas(DeletedFile, "names", base)
 			Js(view, "dseSetup(\"" + base + "\"," + text + ")")
+			Js(view, "dseRun(\"" + base + "\"," + ((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).RunEntry(base) + ")")
 		EndIf
 		i += 1
 	EndWhile
@@ -431,6 +455,7 @@ Event OnPageSave(string eventName, string strArg, float numArg, Form sender)
 	JsonUtil.Unload(SetupFolder + "/" + name, false)
 	If ok && (isNew || changed)
 		((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).ForgetRuns(name)
+		Js(view, "dseRun(\"" + name + "\",null)")
 	EndIf
 	Log("saved " + name + " (" + StringUtil.GetLength(text) + " chars, ok " + ok + ")")
 	If ok && JsonUtil.StringListHas(DeletedFile, "names", name)
@@ -462,6 +487,44 @@ Event OnPageDelete(string eventName, string strArg, float numArg, Form sender)
 	((self as Quest) as SkyrimNet_DialogueScenarioEditorMain).ForgetRuns(strArg)
 	Log("deleted " + strArg)
 	Js(view, "dseDeleted(\"" + strArg + "\")")
+EndEvent
+
+; Payload: "<name>". The player cleared the scenario's run record in this save (the page's button):
+; it counts as never run, also for scenarios that need it first.
+Event OnPageForget(string eventName, string strArg, float numArg, Form sender)
+	int view = numArg as int
+	If view != 0
+		pageView = view
+	EndIf
+	If !IsSafeName(strArg)
+		Return
+	EndIf
+	SkyrimNet_DialogueScenarioEditorMain main = (self as Quest) as SkyrimNet_DialogueScenarioEditorMain
+	main.ForgetRuns(strArg)
+	Log("run record of " + strArg + " cleared from the page")
+	Js(pageView, "dseRun(\"" + strArg + "\"," + main.RunEntry(strArg) + ",1)")
+EndEvent
+
+; Payload: the excluded scenes, one per line (the page trims them and drops empty ones and
+; duplicates). The player saved the list in the page: it replaces the mod's own exclude file.
+Event OnPageExclude(string eventName, string strArg, float numArg, Form sender)
+	int view = numArg as int
+	If view != 0
+		pageView = view
+	EndIf
+	string[] lines = PapyrusUtil.StringSplit(strArg, "\n")
+	JsonUtil.StringListClear(ExcludeFile, "scenes")
+	int i = 0
+	While i < lines.Length
+		If lines[i] != "" && StringUtil.Find(lines[i], "\"") < 0 && StringUtil.Find(lines[i], "\\") < 0
+			JsonUtil.StringListAdd(ExcludeFile, "scenes", lines[i], false)
+		EndIf
+		i += 1
+	EndWhile
+	bool ok = JsonUtil.Save(ExcludeFile, false)
+	Log("excluded scenes saved (" + JsonUtil.StringListCount(ExcludeFile, "scenes") + ", ok " + ok + ")")
+	SendExcluded(pageView)
+	Js(pageView, "dseExcludeSaved(" + (ok as int) + ")")
 EndEvent
 
 ; The DLL's log (see the main script's Log).

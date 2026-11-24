@@ -115,6 +115,9 @@ label { cursor: pointer; }
 #genstat.err { color: var(--danger); }
 #genstat.ok { color: var(--ok); }
 .ltools button { padding: 0 6px; }
+/* Run in this save: a small mark in the list, a larger one in the editor */
+.ran { flex: none; margin-right: 6px; padding: 0 6px; border-radius: 8px; font-size: 11px; color: #10240f; background: #8fd48a; }
+.ran.big { font-size: 13px; padding: 1px 8px; }
 .addcol { flex: 0 0 120px; display: flex; }
 .addcol button { flex: 1; border-style: dashed; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -165,6 +168,14 @@ input[type=checkbox]:focus { outline: none; }
 #plist .npc .pl { color: var(--muted); font-size: 12px; white-space: nowrap; }
 #pbox .pf { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
 #pbox .pf .hint { flex: 1; }
+#side .foot #exBtn { margin-top: 6px; }
+#exclude { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 10; }
+#exclude.open { display: flex; }
+#xbox { width: 520px; max-width: 92vw; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+#xbox h2 { margin: 0 0 8px; font-size: 18px; }
+#xbox p { margin: 0 0 10px; line-height: 1.6; }
+#xbox textarea { min-height: 180px; font-family: Consolas, monospace; }
+#xbox .btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -178,7 +189,7 @@ input[type=checkbox]:focus { outline: none; }
     <div id="side">
       <div class="head">イベント一覧<br><span class="hint">右のスイッチで有効／無効（すぐ保存されます）</span></div>
       <div id="list"></div>
-      <div class="foot"><button id="newBtn">＋ 新しいイベント</button></div>
+      <div class="foot"><button id="newBtn">＋ 新しいイベント</button><button id="exBtn">除外するシーン</button></div>
     </div>
     <div id="main">
       <div id="editor"><div id="empty">左の一覧からイベントを選ぶか、「新しいイベント」を押してください。</div></div>
@@ -196,6 +207,19 @@ input[type=checkbox]:focus { outline: none; }
     <div class="ph"><input id="psearch" placeholder="名前で検索"><button id="pclose">キャンセル</button></div>
     <div id="plist"></div>
     <div class="pf"><span class="hint" id="pstat"></span><button id="pload">すべての NPC を読み込む</button></div>
+  </div>
+</div>
+
+<div id="exclude">
+  <div id="xbox">
+    <h2>除外するシーン</h2>
+    <p class="hint">シナリオでセックスシーンを始めるとき、ここに書いたシーンは選びません（全シナリオ共通）。1 行に 1 つ、シーン ID を書きます。先頭が一致するものはすべて除外します（例：<code>BillyyCcg</code> と書くと BillyyCcg-1、BillyyCcg-2… がすべて外れます）。大文字・小文字も ID のとおりに書いてください。<br>
+    ID は、この MOD のログの「OStim scene ～」「scene ～」の行に出ます。SexLab ではシーン ID（P+）かアニメ名（1.6x）を書きます。</p>
+    <textarea id="xtext" spellcheck="false" placeholder="BillyyCcg"></textarea>
+    <div class="btns">
+      <button id="xCancel">キャンセル</button>
+      <button id="xSave" class="primary">保存</button>
+    </div>
   </div>
 </div>
 
@@ -236,10 +260,20 @@ function send(name, payload) {
 
 // fast: the DLL lists every NPC at once, so the list is loaded right away (without it, the
 // Papyrus scan takes minutes and waits for the button).
-window.dseBegin = (player, fast) => { S.player = player; S.setups = {}; S.order = []; S.nearby = []; S.fastNpcs = !!fast; };
+window.dseBegin = (player, fast) => { S.player = player; S.setups = {}; S.order = []; S.nearby = []; S.runs = {}; S.loading = true; S.fastNpcs = !!fast; };
+// A scenario's run record in this save: [days since it last started, that run finished (1/0),
+// "cell it is blocked in"], or null when it never ran. cleared: the answer to the clear button.
+window.dseRun = (name, entry, cleared) => {
+  if (entry) S.runs[name] = entry; else delete S.runs[name];
+  if (S.loading) return;
+  renderList();
+  if (isCurrent(name)) renderEditor();
+  if (cleared) msg("「" + name + "」の実行済みをクリアしました。", "ok");
+};
 window.dseSetup = (name, obj) => { if (obj && typeof obj === "object") { S.setups[name] = fromFile(name, obj); S.order.push(name); } };
 window.dseNearby = (list) => { S.nearby = (list || []).map(toNpc); };
 window.dseEnd = () => {
+  S.loading = false;
   S.order.sort();
   if (S.sel && !S.setups[S.sel] && !(S.draft && S.draft.isNew)) { S.sel = null; S.draft = null; }
   if (S.sel && S.setups[S.sel] && !(S.draft && S.draft.dirty)) S.draft = clone(S.setups[S.sel]);
@@ -294,10 +328,12 @@ const AUTOLINES = [3, 6, 10], AUTONAMES = ["短", "中", "長"];
 // What ends a column (end): 0 nothing, 1 a sex scene (OStim or SexLab; tags in OStim's names), 2 move and wait (move: who =
 // participant indexes, place = {spec, label} from the DLL's list, until = a scenario name or "",
 // days = longest wait). More kinds can be added to ENDS.
-const ENDS = [[0, "なし（セリフだけ）"], [1, "セックスシーン（OStim / SexLab）"], [2, "移動して待機"], [3, "SkyrimNet のアクション"]];
+const ENDS = [[0, "なし（セリフだけ）"], [1, "セックスシーン（OStim / SexLab）"], [2, "移動して待機"], [3, "SkyrimNet のアクション"], [4, "シーンを終わらせる"]];
+// A sex scene's bed (bed): 0 as OStim's / SexLab's own settings, 1 on a nearby bed (as 0 when there is none), 2 never on furniture.
+const BEDS = [[0, "おまかせ（OStim / SexLab の設定どおり）"], [1, "ベッドを使う（近くにあれば）"], [2, "ベッドを使わない"]];
 function blankAct() { return { name: "", mod: "", who: 0, args: {} }; }
 function blankMove() { return { who: [], place: null, until: "", days: 3 }; }
-function blankCol() { return { actors: [], lines: [], end: 1, tags: "", narrator: "", auto: false, autolen: 1, move: blankMove(), act: blankAct() }; }
+function blankCol() { return { actors: [], lines: [], end: 1, tags: "", bed: 0, narrator: "", auto: false, autolen: 1, move: blankMove(), act: blankAct() }; }
 // gen: what Generate was (or will be) asked with, kept with the setup so it can be run again.
 function blankGen() { return { theme: "", writer: null, people: [], columns: 3 }; }
 function blankSetup(name) {
@@ -335,6 +371,7 @@ function fromFile(name, o) {
     let args = {};
     try { args = JSON.parse(T[k + "actargs"] || "{}") || {}; } catch (e) { args = {}; }
     col.act = { name: T[k + "action"] || "", mod: T[k + "actmod"] || "", who: I[k + "actwho"] ?? 0, args };
+    col.bed = I[k + "bed"] || 0;
     col.tags = T[k + "tags"] || ""; col.narrator = T[k + "narrator"] || "";
     if (col.actors.length) s.shown = c + 1;
   }
@@ -357,6 +394,7 @@ function toFile(s) {
     const lines = col.lines.filter((l) => (l.text.trim() !== "" || l.auto) && l.who >= 0 && l.who < col.actors.length);
     o.int[k + "end"] = col.end;
     o.int[k + "ostim"] = col.end === 1 ? 1 : 0; // for older builds
+    if (col.end === 1 && col.bed) o.int[k + "bed"] = col.bed;
     if (col.end === 2) {
       const m = col.move;
       o.intList[k + "movewho"] = m.who.filter((i) => i < col.actors.length && !isPlayer(col.actors[i].spec));
@@ -395,7 +433,9 @@ function renderList() {
     const d = document.createElement("div");
     const on = !!(s && s.enabled);
     d.className = "item" + (cur ? " sel" : "") + (on ? "" : " off");
+    const ran = S.runs && S.runs[n];
     d.innerHTML = '<span class="nm">' + esc(n) + (s && s.dirty ? " *" : "") + "</span>" +
+      (ran ? '<span class="ran" title="このセーブで実行済み">済</span>' : "") +
       '<input type="checkbox" title="有効／無効"' + (on ? " checked" : "") + ">";
     const sw = d.querySelector("input");
     sw.onclick = (e) => e.stopPropagation();
@@ -434,6 +474,23 @@ function confirmLeave() {
 function touch() { if (!S.draft.dirty) { S.draft.dirty = true; renderList(); } }
 function updateSaveBtn() { $("saveBtn").classList.toggle("dirty", !!(S.draft && S.draft.dirty)); }
 
+// Whether the scenario has run in this save, and the button that clears that.
+function runRow(d) {
+  const r = !d.isNew && S.runs ? S.runs[d.name] : null;
+  let h = '<div class="row"><span class="lbl">実行状態</span>';
+  if (!r) {
+    h += '<span class="hint">このセーブではまだ実行されていません</span>';
+  } else {
+    const ago = Number(r[0]) || 0;
+    const when = ago < 1 / 24 ? "1 時間以内" : ago < 1 ? Math.round(ago * 24) + " 時間前" : (Math.round(ago * 10) / 10) + " 日前";
+    h += '<span class="ran big">実行済み</span><span>' + when + "に始まり、" + (r[1] ? "最後まで終わりました" : "最後まで終わっていません（実行中か、途中で止まりました）") + "</span>";
+    if (r[2]) h += '<span class="hint">「' + esc(r[2]) + "」ではもう始まりません（そのセルを出ると解除）</span>";
+    h += '<button class="small" id="f_forget">実行済みをクリア</button>';
+    h += '<span class="hint">クリアすると、まだ一度も起きていない扱いになります（このシナリオを前提にしているシナリオも、もう一度これが終わるまで始まりません）</span>';
+  }
+  return h + "</div>";
+}
+let forgetArmed = false;
 function renderEditor() {
   const ed = $("editor"), d = S.draft;
   $("saveBtn").disabled = $("delBtn").disabled = !d;
@@ -465,6 +522,7 @@ function renderEditor() {
   h += '<div class="row"><span class="lbl">前提</span>' +
     dropdown("requires", d.requires, [["", "なし"]].concat(otherScenarios(d).map((n) => [n, n + " が起きたあと"])), "") +
     '<span class="hint">選んだシナリオが一度終わるまで、このシナリオは発火しません</span></div>';
+  h += runRow(d);
   h += genPanel(d);
   h += '<div id="cols">';
   d.cols.slice(0, d.shown).forEach((col, c) => {
@@ -506,15 +564,19 @@ function renderEditor() {
     }
     h += '<div class="sec"><div class="t">列の最後に</div>' + dropdown("end:" + c, col.end, ENDS, "");
     if (col.end === 1) {
-      h += '<div class="hint">前の列のシーン中のキャラは、そのシーンを止めてから新しいシーンを始めます（同じシーンにいた全員のシーンが終わります）。</div>';
+      h += '<div class="hint">前の列のシーンに同じ顔ぶれだけでいるときは、シーンを続けたままアニメを切り替えます。顔ぶれが違うときは、そのシーンを止めてから新しいシーンを始めます（同じシーンにいた全員のシーンが終わります）。</div>';
       h += '<div class="t" style="margin-top:6px">タグ（どれかに合うシーンを選びます。なしならおまかせ。SexLab では近いタグに読み替えます。使う MOD は MCM で選べます）</div>';
       h += '<div class="tags">' + tagChips(col.tags, c) + "</div>";
       h += '<div class="t" style="margin-top:6px">候補にないタグ（カンマ区切り）</div>';
       h += '<input data-tags="' + c + '" value="' + esc(tagList(col.tags).filter((t) => !TAGS.some((x) => x[0] === t)).join(",")) + '" style="width:100%">';
+      h += '<div class="t" style="margin-top:6px">ベッド</div>' + dropdown("bed:" + c, col.bed || 0, BEDS, "");
+      if (col.bed === 1) h += '<div class="hint">近くにベッドがないとき、ベッドに合うシーンがないときは、ふつうに始めます。</div>';
     } else if (col.end === 2) {
       h += moveForm(d, col, c);
     } else if (col.end === 3) {
       h += actionForm(d, col, c);
+    } else if (col.end === 4) {
+      h += '<div class="hint">この列のセリフが終わったら、参加キャラが入っているセックスシーンを終わらせます（同じシーンにいた全員のシーンが終わります）。シーンに入っていなければ何もしません。</div>';
     } else {
       h += '<div class="hint">セリフだけの列になります。</div>';
     }
@@ -535,6 +597,7 @@ function dropdown(key, value, options, empty) {
 function pickDropdown(key, raw) {
   const d = S.draft, [kind, at] = key.split(":");
   if (kind === "end") d.cols[+at].end = +raw;
+  else if (kind === "bed") d.cols[+at].bed = +raw;
   else if (kind === "until") d.cols[+at].move.until = raw;
   else if (kind === "requires") d.requires = raw;
   touch(); renderEditor();
@@ -790,6 +853,11 @@ function wire() {
   const cellBtn = $("f_cell"); if (cellBtn) cellBtn.onclick = () => openPicker("cell");
   const cellRm = $("f_cellrm"); if (cellRm) cellRm.onclick = () => { d.cell = null; touch(); renderEditor(); };
   const hereBtn = $("f_here"); if (hereBtn) hereBtn.onclick = () => { S.hereFor = d.name; msg("今いるセルを調べています…"); send("dse_here", ""); };
+  const forgetBtn = $("f_forget");
+  if (forgetBtn) forgetBtn.onclick = () => {
+    if (!forgetArmed) { forgetArmed = true; msg("もう一度「実行済みをクリア」を押すと、「" + d.name + "」をまだ起きていない扱いにします。", "err"); setTimeout(() => (forgetArmed = false), 4000); return; }
+    forgetArmed = false; msg("クリアしています…"); send("dse_forget", d.name);
+  };
   ed.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => {
     const [c, i] = b.dataset.rm.split(",").map(Number), col = d.cols[c];
     col.actors.splice(i, 1);
@@ -1010,8 +1078,35 @@ $("cSave").onclick = () => {
   S.closeAfterSave = save();  // closes once the file is written; stays open if it cannot be saved
 };
 // Esc: closes the warning or the NPC picker if one is open, otherwise asks to close the page.
+// ---------------------------------------------------------------- excluded scenes
+// The list lives in the mod's own file; Papyrus sends it with the setups and again after a save.
+window.dseExclude = (list) => { S.excluded = Array.isArray(list) ? list : []; };
+window.dseExcludeSaved = (ok) => {
+  if (!ok) { msg("除外するシーンを保存できませんでした。", "err"); return; }
+  closeExclude();
+  msg("除外するシーンを保存しました（" + (S.excluded || []).length + " 件）。", "ok");
+};
+function excludeOpen() { return $("exclude").classList.contains("open"); }
+function closeExclude() { $("exclude").classList.remove("open"); }
+$("exBtn").onclick = () => {
+  $("xtext").value = (S.excluded || []).join("\n");
+  $("exclude").classList.add("open");
+  setTimeout(() => $("xtext").focus(), 50);
+};
+$("xCancel").onclick = closeExclude;
+$("xSave").onclick = () => {
+  const seen = new Set(), lines = [];
+  for (const raw of $("xtext").value.split(/[\r\n,]+/)) {
+    const t = raw.trim().replace(/["\\]/g, "");
+    if (t && !seen.has(t)) { seen.add(t); lines.push(t); }
+  }
+  msg("保存しています…");
+  if (!send("dse_exclude", lines.join("\n"))) msg("ゲームに送れませんでした。", "err");
+};
+
 function onEscape() {
-  if (confirmOpen()) hideConfirm();
+  if (excludeOpen()) closeExclude();
+  else if (confirmOpen()) hideConfirm();
   else if (S.pick) closePicker();
   else requestClose();
 }

@@ -41,6 +41,112 @@ Bool Function StopSceneOf(Quest api, Actor who) Global
 	Return True
 EndFunction
 
+; SexLab tags that only say how a scene feels (from the OStim mood tags romantic, lustful, dom): tried
+; only after the tags that say what happens, so a mood tag alone does not pick the scene.
+Bool Function IsMoodTag(String tag) Global
+	Return tag == "Loving" || tag == "Romance" || tag == "Rough" || tag == "Dirty" || tag == "Dominant"
+EndFunction
+
+; The order to try the tags in: from a random one on, those that say what happens first, the mood
+; tags after them.
+String[] Function TryOrder(String[] tags) Global
+	String[] out = Utility.CreateStringArray(0)
+	If tags.Length == 0
+		Return out
+	EndIf
+	Int start = Utility.RandomInt(0, tags.Length - 1)
+	Int pass = 0
+	While pass < 2
+		Int i = 0
+		While i < tags.Length
+			String tag = tags[(start + i) % tags.Length]
+			If IsMoodTag(tag) == (pass == 1)
+				out = PapyrusUtil.PushString(out, tag)
+			EndIf
+			i += 1
+		EndWhile
+		pass += 1
+	EndWhile
+	Return out
+EndFunction
+
+; Whether the scene ID (P+) or animation registry name / name (1.6x) begins with one of the
+; excluded entries.
+Bool Function IsExcluded(String id, String[] excluded) Global
+	If id == ""
+		Return False
+	EndIf
+	Int i = 0
+	While i < excluded.Length
+		If excluded[i] != "" && StringUtil.Find(id, excluded[i]) == 0
+			Return True
+		EndIf
+		i += 1
+	EndWhile
+	Return False
+EndFunction
+
+; Up to count of the scenes, in order from a random start (wrapping around).
+String[] Function Sample(String[] scenes, Int count) Global
+	If scenes.Length <= count
+		Return scenes
+	EndIf
+	String[] out = Utility.CreateStringArray(count)
+	Int start = Utility.RandomInt(0, scenes.Length - 1)
+	Int i = 0
+	While i < count
+		out[i] = scenes[(start + i) % scenes.Length]
+		i += 1
+	EndWhile
+	Return out
+EndFunction
+
+; The scenes that are not excluded, in the same order.
+String[] Function WithoutExcluded(String[] scenes, String[] excluded) Global
+	If excluded.Length == 0 || scenes.Length == 0
+		Return scenes
+	EndIf
+	String[] kept = Utility.CreateStringArray(0)
+	Int i = 0
+	While i < scenes.Length
+		If !IsExcluded(scenes[i], excluded)
+			kept = PapyrusUtil.PushString(kept, scenes[i])
+		EndIf
+		i += 1
+	EndWhile
+	If kept.Length < scenes.Length
+		Debug.Trace("[SkyrimNet_DialogueScenarioEditor] SexLab: " + (scenes.Length - kept.Length) + " excluded scene(s) left out")
+	EndIf
+	Return kept
+EndFunction
+
+; The SexLab scene the whole cast is in together, with no one else in it; None otherwise.
+sslThreadController Function SharedThread(Quest api, Actor[] cast) Global
+	SexLabFramework sexLab = api as SexLabFramework
+	If cast.Length == 0 || !IsActive(api, cast[0])
+		Return None
+	EndIf
+	sslThreadController thread = sexLab.GetActorController(cast[0])
+	Actor[] inThread = thread.Positions
+	If !inThread || inThread.Length != cast.Length
+		Return None
+	EndIf
+	Int i = 0
+	While i < cast.Length
+		If inThread.Find(cast[i]) < 0 || sexLab.GetActorController(cast[i]) != thread
+			Return None
+		EndIf
+		i += 1
+	EndWhile
+	Return thread
+EndFunction
+
+; The nearest free bed SexLab knows within radius of center; None when there is none.
+ObjectReference Function FindBed(Quest api, ObjectReference center, Float radius) Global
+	SexLabFramework sexLab = api as SexLabFramework
+	Return sexLab.FindBed(center, radius, True, None, None)
+EndFunction
+
 ; Whether every actor is enabled and loaded: the scene search takes a while, and one unloaded
 ; meanwhile is not handed to SexLab.
 Bool Function AllLoaded(Actor[] actors) Global

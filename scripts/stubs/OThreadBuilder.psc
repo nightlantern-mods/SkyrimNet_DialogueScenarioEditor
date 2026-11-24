@@ -6,3 +6,4 @@ Function SetStartingAnimation(int BuilderID, string Animation) Global Native
 int Function Start(int BuilderID) Global Native
 
 Function NoFurniture(int BuilderID) Global Native
+Function SetFurniture(int BuilderID, ObjectReference FurnitureRef) Global Native
