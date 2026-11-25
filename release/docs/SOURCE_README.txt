@@ -1,4 +1,4 @@
-SkyrimNet Dialogue Scenario Editor 0.3.3 - source of SkyrimNet_DialogueScenarioEditor.dll
+SkyrimNet Dialogue Scenario Editor 0.3.4 - source of SkyrimNet_DialogueScenarioEditor.dll
 ==========================================================================================
 
 This folder is the complete source of the DLL shipped in SKSE/Plugins (GPL-3.0-or-later, see

@@ -15,6 +15,7 @@ string Property SetupFolder = "SkyrimNet_DialogueScenarioEditor" AutoReadOnly
 string Property SetupDisk = "Data/SKSE/Plugins/StorageUtilData/SkyrimNet_DialogueScenarioEditor/" AutoReadOnly
 string Property DeletedFile = "SkyrimNet_DialogueScenarioEditor_Deleted" AutoReadOnly ; same as the main script's
 string Property ExcludeFile = "SkyrimNet_DialogueScenarioEditor_Exclude" AutoReadOnly ; same as the main script's
+string Property PageFile = "SkyrimNet_DialogueScenarioEditor_Page" AutoReadOnly ; the page's own settings (size)
 int Property ChunkChars = 3000 AutoReadOnly
 
 int boundKey = 0
@@ -56,6 +57,8 @@ Function Setup()
 	RegisterForModEvent("DSE_Prisma_dse_forget", "OnPageForget")
 	RegisterForModEvent("Magelight_JS_dse_exclude", "OnPageExclude")
 	RegisterForModEvent("DSE_Prisma_dse_exclude", "OnPageExclude")
+	RegisterForModEvent("Magelight_JS_dse_scale", "OnPageScale")
+	RegisterForModEvent("DSE_Prisma_dse_scale", "OnPageScale")
 	RegisterForModEvent("DSE_Gen", "OnGen")
 	sendingNpcs = false
 	usePrisma = UsePrisma()
@@ -193,6 +196,7 @@ Function RegisterListeners(int view)
 	Magelight.RegisterListener(view, "dse_actions")
 	Magelight.RegisterListener(view, "dse_forget")
 	Magelight.RegisterListener(view, "dse_exclude")
+	Magelight.RegisterListener(view, "dse_scale")
 EndFunction
 
 ; The places "move and wait" can send people to (from the DLL), for the page's place picker.
@@ -315,8 +319,21 @@ Function SendAll(int view)
 	SendSetups(view)
 	SendNearby(view)
 	SendExcluded(view)
+	Js(view, "dseScale(" + JsonUtil.GetIntValue(PageFile, "scale", 100) + ")")
 	Js(view, "dseEnd()")
 EndFunction
+
+; Payload: the page size in percent (70-200). The player moved the page's size slider: kept in the
+; mod's own page file for the next time the page opens.
+Event OnPageScale(string eventName, string strArg, float numArg, Form sender)
+	int pct = strArg as int
+	If pct < 50 || pct > 300
+		Return
+	EndIf
+	JsonUtil.SetIntValue(PageFile, "scale", pct)
+	JsonUtil.Save(PageFile, false)
+	Log("page size " + pct + "%")
+EndEvent
 
 ; The excluded sex scenes, for the page's list.
 Function SendExcluded(int view)

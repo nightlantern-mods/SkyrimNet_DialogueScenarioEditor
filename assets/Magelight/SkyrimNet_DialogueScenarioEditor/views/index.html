@@ -19,7 +19,11 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: transparent; color: var(--text);
   font-family: "Yu Gothic UI", "Meiryo", "Segoe UI", sans-serif; font-size: 15px; }
-body { display: flex; align-items: center; justify-content: center; background: var(--bg); }
+body { background: var(--bg); overflow: hidden; }
+/* Everything is drawn inside #zoom, scaled by the page-size slider (transform: the page's renderer
+   may not know CSS zoom). Its size is set from the script: the viewport divided by the scale. */
+#zoom { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; transform-origin: 0 0;
+  display: flex; align-items: center; justify-content: center; }
 button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line);
   border-radius: 6px; padding: 6px 12px; cursor: pointer; }
 button:hover { border-color: var(--accent); }
@@ -32,11 +36,23 @@ textarea { width: 100%; resize: vertical; min-height: 54px; }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent2); }
 label { cursor: pointer; }
 
-#app { width: 94vw; height: 92vh; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+#app { width: 94%; height: 92%; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
 #top { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 #top h1 { font-size: 18px; margin: 0; color: var(--accent); font-weight: 600; flex: 1; }
 #top .key { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; position: relative; }
+/* Page size: a hand-made slider, larger than the other controls so it is easy to find and grab. */
+#top { flex-wrap: wrap; }
+#top h1 { white-space: nowrap; }
+#sizer { flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+#sizer .lab { font-size: 16px; font-weight: 600; white-space: nowrap; }
+#sizer button { font-size: 22px; line-height: 1; width: 40px; height: 40px; padding: 0; font-weight: 700; }
+#sztrack { position: relative; width: 220px; height: 40px; cursor: pointer; touch-action: none; }
+#sztrack .rail { position: absolute; left: 14px; right: 14px; top: 16px; height: 8px; border-radius: 4px; background: #0f1115; border: 1px solid var(--line); }
+#sztrack .fill { position: absolute; left: 14px; top: 16px; height: 8px; border-radius: 4px; background: var(--accent); }
+#sztrack .knob { position: absolute; top: 6px; width: 28px; height: 28px; margin-left: -14px; border-radius: 50%;
+  background: var(--accent); border: 3px solid #ffe3a0; box-shadow: 0 2px 6px rgba(0,0,0,.6); }
+#szval { font-size: 18px; font-weight: 700; min-width: 58px; text-align: right; color: var(--accent); }
 .chip.off { background: transparent; border: 1px solid var(--line); color: var(--muted); }
 .chip.on { background: #5a4520; border: 1px solid var(--accent); }
 #body { flex: 1; display: flex; min-height: 0; }
@@ -149,7 +165,7 @@ input[type=checkbox]:focus { outline: none; }
 /* "Unsaved changes" when closing */
 #confirm { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 10; }
 #confirm.open { display: flex; }
-#cbox { width: 460px; max-width: 90vw; background: var(--panel); border: 2px solid var(--danger); border-radius: 10px; padding: 18px 20px; }
+#cbox { width: 460px; max-width: 90%; background: var(--panel); border: 2px solid var(--danger); border-radius: 10px; padding: 18px 20px; }
 #cbox h2 { margin: 0 0 8px; font-size: 18px; color: var(--danger); }
 #cbox p { margin: 0 0 16px; line-height: 1.6; }
 #cbox .btns { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
@@ -157,7 +173,7 @@ input[type=checkbox]:focus { outline: none; }
 
 #picker { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; }
 #picker.open { display: flex; }
-#pbox { width: 560px; max-width: 90vw; height: 78vh; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+#pbox { width: 560px; max-width: 90%; height: 78%; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   display: flex; flex-direction: column; }
 #pbox .ph { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
 #pbox .ph input { flex: 1; }
@@ -171,7 +187,7 @@ input[type=checkbox]:focus { outline: none; }
 #side .foot #exBtn { margin-top: 6px; }
 #exclude { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 10; }
 #exclude.open { display: flex; }
-#xbox { width: 520px; max-width: 92vw; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+#xbox { width: 520px; max-width: 92%; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
 #xbox h2 { margin: 0 0 8px; font-size: 18px; }
 #xbox p { margin: 0 0 10px; line-height: 1.6; }
 #xbox textarea { min-height: 180px; font-family: Consolas, monospace; }
@@ -179,9 +195,17 @@ input[type=checkbox]:focus { outline: none; }
 </style>
 </head>
 <body>
+<div id="zoom">
 <div id="app">
   <div id="top">
     <h1>ダイアログシナリオエディタ</h1>
+    <div id="sizer" title="画面の大きさ">
+      <span class="lab">画面の大きさ</span>
+      <button id="szDown" title="小さく">−</button>
+      <div id="sztrack"><div class="rail"></div><div class="fill"></div><div class="knob"></div></div>
+      <button id="szUp" title="大きく">+</button>
+      <span id="szval">100%</span>
+    </div>
     <div class="key">この画面を開くキーは MCM で変えられます</div>
     <button id="closeBtn" title="閉じる">✕ 閉じる</button>
   </div>
@@ -234,6 +258,7 @@ input[type=checkbox]:focus { outline: none; }
     </div>
   </div>
 </div>
+</div>
 
 <script>
 "use strict";
@@ -257,6 +282,50 @@ function send(name, payload) {
   return false;
 }
 (function hello() { if (!send("dse_ready", "")) setTimeout(hello, 200); })();
+
+// ---------------------------------------------------------------- page size
+// A player asked for it (low vision). 70 to 200 %, in steps of 10; the whole page (popups too) is
+// scaled. Saved in the mod's own file when the player lets go; Papyrus sends it back on open.
+const SZ_MIN = 70, SZ_MAX = 200, SZ_STEP = 10;
+let pageScale = 100, scaleTimer = 0;
+const snapScale = (pct) => Math.max(SZ_MIN, Math.min(SZ_MAX, Math.round(pct / SZ_STEP) * SZ_STEP));
+function applyScale(pct, save) {
+  pct = snapScale(pct);
+  pageScale = pct;
+  const s = pct / 100, z = $("zoom");
+  z.style.transform = "scale(" + s + ")";
+  z.style.width = (window.innerWidth / s) + "px";
+  z.style.height = (window.innerHeight / s) + "px";
+  showScale(pct);
+  if (save) { clearTimeout(scaleTimer); scaleTimer = setTimeout(() => send("dse_scale", String(pageScale)), 400); }
+}
+// The knob and the number only (while dragging: scaling the page then would move the track
+// under the pointer).
+function showScale(pct) {
+  const f = (pct - SZ_MIN) / (SZ_MAX - SZ_MIN), track = $("sztrack");
+  const usable = track.clientWidth - 28;
+  track.querySelector(".knob").style.left = (14 + usable * f) + "px";
+  track.querySelector(".fill").style.width = (usable * f) + "px";
+  $("szval").textContent = pct + "%";
+}
+window.dseScale = (pct) => applyScale(Number(pct) || 100, false);
+window.addEventListener("resize", () => applyScale(pageScale, false));
+(function wireSizer() {
+  const track = $("sztrack");
+  let dragging = false, dragValue = 100;
+  // The pointer position in the track's own (unscaled) pixels.
+  const pick = (e) => {
+    const r = track.getBoundingClientRect(), s = pageScale / 100;
+    const x = (e.clientX - r.left) / s, usable = track.clientWidth - 28;
+    return snapScale(SZ_MIN + Math.max(0, Math.min(1, (x - 14) / usable)) * (SZ_MAX - SZ_MIN));
+  };
+  track.addEventListener("mousedown", (e) => { dragging = true; dragValue = pick(e); showScale(dragValue); e.preventDefault(); });
+  window.addEventListener("mousemove", (e) => { if (dragging) { dragValue = pick(e); showScale(dragValue); } });
+  window.addEventListener("mouseup", () => { if (dragging) { dragging = false; applyScale(dragValue, true); } });
+  $("szDown").onclick = () => applyScale(pageScale - SZ_STEP, true);
+  $("szUp").onclick = () => applyScale(pageScale + SZ_STEP, true);
+  applyScale(100, false);
+})();
 
 // fast: the DLL lists every NPC at once, so the list is loaded right away (without it, the
 // Papyrus scan takes minutes and waits for the button).

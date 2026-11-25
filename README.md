@@ -1,4 +1,4 @@
-# SkyrimNet Dialogue Scenario Editor 0.3.3
+# SkyrimNet Dialogue Scenario Editor 0.3.4
 
 > [!CAUTION]
 > **Adult content.** Scenarios can end in sex scenes (OStim or SexLab). For adults only.
@@ -45,6 +45,8 @@ Install the archive with Mod Organizer 2 or Vortex. The installer asks for the l
 2. Press the key. Choose **New event**, give it a name (letters, digits, `_` and `-`), and fill in the columns, or use **Generate**.
 3. Press **Save**. The switch next to each event in the list turns it on or off at once.
 4. Walk up to the people of a scenario that is on: it starts when they are all near you (a hotkey scenario starts when you press **Key that starts a hotkey scenario**, set in the MCM).
+
+**Page size** at the top of the page makes the whole page larger or smaller (70 to 200 %): drag the slider or press − / +. The size is kept for the next time the page opens.
 
 A disabled example scenario, `example_riverwood`, is included. A scenario you delete stays deleted, also after the mod is updated.
 

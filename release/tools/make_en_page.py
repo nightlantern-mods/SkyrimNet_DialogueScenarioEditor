@@ -83,6 +83,11 @@ PAIRS = [
     ('const ENDS = [[0, "なし（セリフだけ）"], [1, "セックスシーン（OStim / SexLab）"], [2, "移動して待機"], [3, "SkyrimNet のアクション"], [4, "シーンを終わらせる"]];',
      'const ENDS = [[0, "Nothing (talk only)"], [1, "Sex scene (OStim / SexLab)"], [2, "Move and wait"], [3, "A SkyrimNet action"], [4, "End the scene"]];'),
     ('<div class="t">列の最後に</div>', '<div class="t">At the end of the column</div>'),
+    # page size slider
+    ('<div id="sizer" title="画面の大きさ">', '<div id="sizer" title="Page size">'),
+    ('<span class="lab">画面の大きさ</span>', '<span class="lab">Page size</span>'),
+    ('<button id="szDown" title="小さく">', '<button id="szDown" title="Smaller">'),
+    ('<button id="szUp" title="大きく">', '<button id="szUp" title="Larger">'),
     # 0.3.2: bed, run record, excluded scenes
     ('const BEDS = [[0, "おまかせ（OStim / SexLab の設定どおり）"], [1, "ベッドを使う（近くにあれば）"], [2, "ベッドを使わない"]];',
      'const BEDS = [[0, "As OStim / SexLab are set"], [1, "On a bed (if one is near)"], [2, "Never on a bed"]];'),
